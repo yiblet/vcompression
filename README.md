@@ -1,4 +1,4 @@
-# VCompression
+# VCompression [![Build Status](https://travis-ci.org/yiblet/vcompression.svg?branch=master)](https://travis-ci.org/yiblet/vcompression)
 
 Vcompression is an experimental video compression algorithm built specifically to be streamable, well-compressed, and have competitive quality and a competitive bitrate to existing streaming compression algorithms.
 
