@@ -2,3 +2,5 @@ numpy>=1.14
 opencv-python>=3.4
 pep8>=1.7
 tensorflow>=1.10
+pytest>=3.7
+pylint>=2.1
