@@ -1,7 +1,6 @@
 """
 retriever: this abstracts out the various different data retrieval methods available
 """
-
 from abc import ABC, abstractmethod
 import json
 import subprocess
@@ -22,7 +21,6 @@ class AbstractRetriever(ABC):
         pass
 
 class MPEGRetriever(AbstractRetriever):
-
     """Docstring for MPEGRetriever. """
 
     def __init__(self, file):
