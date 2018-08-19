@@ -6,6 +6,7 @@ from __future__ import absolute_import
 import numpy as np
 from src.retriever import AbstractRetriever, MPEGRetriever
 
+
 class TestRetriever(AbstractRetriever):
     """Tests the Abstract Retriever"""
 
@@ -28,6 +29,7 @@ def test_abstract_retriever():
         retriever.retrieve()
     except:
         assert False
+
 
 def test_mpeg_retriever():
     """tests the mpeg retriever"""
