@@ -31,30 +31,24 @@ class MPEGRetriever(AbstractRetriever):
 
     def _get_metadata(self):
         ffprobe_call = [
-            "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-            "stream=width,height", "-of", "json", self.file
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height", "-of", "json", self.file
         ]
         info = json.load(
-            subprocess.Popen(ffprobe_call, stdout=subprocess.PIPE).stdout
-        )
+            subprocess.Popen(ffprobe_call, stdout=subprocess.PIPE).stdout)
         self.width, self.height = info['streams'][0]['width'], info['streams'][
-            0
-        ]['height']
+            0]['height']
 
     def retrieve(self):
         if self.width is None or self.height is None:
             self._get_metadata()
 
-        out, _ = (
-            ffmpeg.input(self.file).output(
-                'pipe:', format='rawvideo', pix_fmt='rgb24'
-            ).run(capture_stdout=True, capture_stderr=True)
-        )
+        out, _ = (ffmpeg.input(self.file).output(
+            'pipe:', format='rawvideo', pix_fmt='rgb24').run(
+                capture_stdout=True, capture_stderr=True))
 
-        return (
-            np.frombuffer(out, np.uint8)
-            .reshape([-1, self.width, self.height, 3])
-        )
+        return (np.frombuffer(out, np.uint8)
+                .reshape([-1, self.width, self.height, 3]))
 
     @staticmethod
     def reset():

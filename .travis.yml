@@ -7,6 +7,4 @@ python:
 install:
   ./.travis/install.sh
 script:
-  - pytest --workers auto
-  - find src -iname "*.py" | xargs pylint
-  - find scripts -iname "*.py" | xargs pylint
+  ./.travis/script.sh

@@ -105,3 +105,4 @@ venv.bak/
 
 # additional ignores
 data/
+**.*sw[poa]
