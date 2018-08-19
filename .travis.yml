@@ -1,11 +1,12 @@
 language: python
+sudo: required
 python:
   - "3.4"
   - "3.5"
   - "3.6"
 install:
-  - pip install -r requirements.txt
-# command to run tests
+  ./.travis/install.sh
 script:
-  - pytest
+  - pytest --workers auto
   - find src -iname "*.py" | xargs pylint
+  - find scripts -iname "*.py" | xargs pylint
