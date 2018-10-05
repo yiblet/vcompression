@@ -1,4 +1,3 @@
-ffmpeg-python==0.1.16
 pylint==2.1.1
 pytest==3.7.2
 pytest-parallel==0.0.2
