@@ -4,38 +4,53 @@
 import numpy as np
 import tensorflow as tf
 
+WIDTH = 512
+HEIGHT = WIDTH
 
-def maxPoolLayer(x, kHeight, kWidth, strideX, strideY, name, padding="SAME"):
-    """max-pooling"""
-    return tf.nn.max_pool(x, ksize=[1, kHeight, kWidth, 1],
-                          strides=[1, strideX, strideY, 1], padding=padding, name=name)
-
-
-def dropout(x, keep_pro, name=None):
-    """dropout"""
-    return tf.nn.dropout(x, keep_pro, name)
+SHAPE = [
+    HEIGHT,
+    WIDTH,
+    3,
+]
 
 
-def fcLayer(x, inputD, outputD, reluFlag, name):
-    """fully-connect"""
-    with tf.variable_scope(name) as scope:
-        w = tf.get_variable("w", shape=[inputD, outputD], dtype="float")
-        b = tf.get_variable("b", [outputD], dtype="float")
-        out = tf.nn.xw_plus_b(x, w, b, name=scope.name)
-        if reluFlag:
-            return tf.nn.relu(out)
-        else:
-            return out
+def get_dims(tensor):
+    return [x.value for x in tf.shape(tensor)]
 
 
-def convLayer(x, kHeight, kWidth, strideX, strideY,
-              featureNum, name, padding="SAME"):
-    """convlutional"""
-    channel = int(x.get_shape()[-1])
-    with tf.variable_scope(name) as scope:
-        w = tf.get_variable("w", shape=[kHeight, kWidth, channel, featureNum])
-        b = tf.get_variable("b", shape=[featureNum])
-        featureMap = tf.nn.conv2d(
-            x, w, strides=[1, strideY, strideX, 1], padding=padding)
-        out = tf.nn.bias_add(featureMap, b)
-        return tf.nn.relu(tf.reshape(out, featureMap.get_shape().as_list()), name=scope.name)
+def get_image_dims(tensor):
+    height_idx = 1
+    width_idx = 2
+    return get_dims(images)[height_idx:width_idx + 1]
+
+
+def downsize(images, height_factor=2, width_factor=2):
+    width, height = get_image_dims(images)
+    return tf.image.resize_images(  # resize_images is possibly broken
+        images,
+        [height / height_factor, width / width_factor]
+        method=tf.image.ResizeMethod.NEAREST_NEIGHBOR,
+    )
+
+
+def upsize(images, height_factor=2, width_factor=2):
+    width, height = get_image_dims(images)
+    return tf.image.resize_images(  # resize_images is possibly broken
+        images,
+        [height * height_factor, width * width_factor]
+        method=tf.image.ResizeMethod.NEAREST_NEIGHBOR,
+    )
+
+
+def compress(arg):
+    # TODO
+    pass
+
+
+def contract(images):
+    if get_image_dims(images)[0] == 2:
+        return [images]
+    smaller_images = resize(images)
+    contracted_images = contract(smaller_images)
+    smaller_images = contracted_images[-1]
+    compress(images - upsize_images(smaller_images))
