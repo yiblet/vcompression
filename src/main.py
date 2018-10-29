@@ -1,15 +1,15 @@
-"""
-@author: Shalom Yiblet
-"""
-import numpy as np
+import os
+import pprint
 import tensorflow as tf
-import sys
+import tensorflow as tf
 from tensorflow import keras
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import numpy as np
 
-WIDTH = 512
+WIDTH = 32
 HEIGHT = WIDTH
+CHANNEL = 3
 
 SHAPE = [
     HEIGHT,
@@ -17,10 +17,27 @@ SHAPE = [
     3,
 ]
 
-# reparameterization trick
-# instead of sampling from Q(z|X), sample eps = N(0,I)
-# z = z_mean + sqrt(var)*eps
-#
+LOCAL = 'COLAB_TPU_ADDR' not in os.environ
+
+
+if LOCAL:
+    DIRECTORY = 'out'
+    DATA = 'data/cifar10'
+    print('running locally')
+else:
+    DIRECTORY = '/gdrive/My Drive/data'
+    DATA = 'cifar-10-batches-py'
+
+    TPU_ADDRESS = 'grpc://' + os.environ['COLAB_TPU_ADDR']
+    print('TPU address is', TPU_ADDRESS)
+
+    with tf.Session(TPU_ADDRESS) as session:
+        devices = session.list_devices()
+
+    print('TPU devices:')
+    pprint.pprint(devices)
+
+tf.reset_default_graph()
 
 
 def unpickle(file):
@@ -44,7 +61,7 @@ def parse_cifar(file):
     return data
 
 
-def construct_vae(original_dim, hidden=128, z_dims=16, learning_rate=1e-3):
+def construct_vae(original_dim, hidden=16, z_dims=16, learning_rate=1e-3):
     x_input = tf.placeholder(tf.float32, shape=[None, *original_dim])
     z_input = tf.placeholder(tf.float32, shape=[None, z_dims])
 
@@ -133,19 +150,17 @@ def construct_vae(original_dim, hidden=128, z_dims=16, learning_rate=1e-3):
     _, x_hat = generator(z)
     x_gen, _ = generator(z_input)
 
-    epsilon = 1e-10
-
     print(x_hat, x_input)
 
     recon_loss = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(
-        logits=x_hat, labels=x_input), axis=[1, 2, 3])
+        logits=x_hat, labels=x_input), axis=[1, 2, 3]
+    ) * WIDTH * HEIGHT * CHANNEL
 
     latent_loss = -0.5 * tf.reduce_sum(
         1 + z_log_var - tf.square(z_mu) - tf.exp(z_log_var), axis=1
     )
 
     total_loss = tf.reduce_mean(recon_loss + latent_loss)
-    # total_loss = tf.Print(total_loss, [recon_loss, latent_loss])
     train_op = tf.train.AdamOptimizer(
         learning_rate=learning_rate).minimize(total_loss)
 
@@ -167,38 +182,69 @@ def plot(samples):
         ax.set_xticklabels([])
         ax.set_yticklabels([])
         ax.set_aspect('equal')
-        plt.imshow(sample.reshape(32, 32), cmap='Greys_r')
+        plt.imshow(sample)
 
     return fig
 
 
 def main():
-    data = parse_cifar('data/cifar10/data_batch_1')
 
-    test = parse_cifar('data/cifar10/test_batch')
+    data = [
+        parse_cifar(f'{DATA}/data_batch_{i}')
+        for i in range(1, 6)
+    ]
+
+    data = np.array(data)
+    data = data.reshape((-1, 32, 32, 3))
+
+    print(data.shape)
+
+    test = parse_cifar(f'{DATA}/test_batch')
     print(test.shape)
     epochs = 1
 
     (x_input, z_input, x_gen, x_hat, total_loss,
      train_op) = construct_vae((32, 32, 3))
 
-    sess = tf.Session()
-    sess.run(tf.global_variables_initializer())
+    if LOCAL:
+        sess = tf.Session()
+    else:
+        sess = tf.Session(TPU_ADDRESS)
 
     data = data / 255.0
 
-    for x in range(1000):
-        X_mb = data[np.random.choice(
-            data.shape[0], 1000, replace=False), ...]
-        _, loss = sess.run([train_op, total_loss], feed_dict={x_input: X_mb})
-        print(loss)
-        if (x % 10) == 0:
-            samples = sess.run(x_gen, feed_dict={
-                z_input: np.random.randn(16, 16)})
-            fig = plot(rgb2gray(samples))
-            plt.savefig('out/{}.png'.format(str(x).zfill(3)),
-                        bbox_inches='tight')
-            plt.close()
+    try:
+        sess.run(tf.global_variables_initializer())
+        if not LOCAL:
+            print('Initializing TPUs...')
+            sess.run(tf.contrib.tpu.initialize_system())
+
+        print('Running ops')
+
+        if not os.path.exists(DIRECTORY):
+            os.mkdir(DIRECTORY)
+
+        for x in range(10000):
+            X_mb = data[np.random.choice(
+                data.shape[0], 1000, replace=False), ...]
+            _, loss = sess.run([train_op, total_loss],
+                               feed_dict={x_input: X_mb})
+
+            if (x % 100) == 0:
+                samples = sess.run(x_gen, feed_dict={
+                    z_input: np.random.randn(16, 16)})
+                fig = plot(samples)
+                plt.title(f'Epoch {x}')
+                plt.savefig(f'{DIRECTORY}/epoch_{x}.png')
+                if not LOCAL:
+                    plt.show()
+                plt.close()
+
+    finally:
+        # For now, TPU sessions must be shutdown separately from
+        # closing the session.
+        sess.run(tf.contrib.tpu.shutdown_system())
+        sess.close()
 
 
 def compress(arg):

@@ -107,3 +107,5 @@ venv.bak/
 data/
 **.*sw[poa]
 local
+MNIST_data
+out
