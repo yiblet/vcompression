@@ -106,6 +106,7 @@ venv.bak/
 # additional ignores
 data/
 **.*sw[poa]
-local
+local/
 MNIST_data
 out
+.env

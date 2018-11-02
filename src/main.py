@@ -1,41 +1,164 @@
+# @title The Big Ol' File { display-mode: "form" }
 import os
 import pprint
-import tensorflow as tf
 import tensorflow as tf
 from tensorflow import keras
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy as np
+import types
+import subprocess
+import sys
 
-WIDTH = 32
+WIDTH = 28
 HEIGHT = WIDTH
-CHANNEL = 3
+CHANNEL = 1
 
-SHAPE = [
-    HEIGHT,
-    WIDTH,
-    3,
-]
+URL_LOG = 'url.txt'
 
-LOCAL = 'COLAB_TPU_ADDR' not in os.environ
+DEFAULT_SUMMARY_COLLECTION = 'summaries'
+
+FLAGS = types.SimpleNamespace()
+FLAGS.is_set = False
 
 
-if LOCAL:
-    DIRECTORY = 'out'
-    DATA = 'data/cifar10'
-    print('running locally')
-else:
-    DIRECTORY = '/gdrive/My Drive/data'
-    DATA = 'cifar-10-batches-py'
+def variable_summaries(key, var, collection):
+    """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
+    with tf.name_scope(f'{key}_summaries'):
+        mean = tf.reduce_mean(var)
+        with tf.name_scope('stddev'):
+            stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
+        tf.summary.scalar('mean', mean)
+        tf.summary.scalar('stddev', stddev)
+        tf.summary.scalar('max', tf.reduce_max(var))
+        tf.summary.scalar('min', tf.reduce_min(var))
+        tf.summary.histogram('histogram', var)
 
-    TPU_ADDRESS = 'grpc://' + os.environ['COLAB_TPU_ADDR']
-    print('TPU address is', TPU_ADDRESS)
 
-    with tf.Session(TPU_ADDRESS) as session:
-        devices = session.list_devices()
+class SummaryScope(dict):
+    def __init__(self, scope_name, collection=DEFAULT_SUMMARY_COLLECTION):
+        super()
+        self.scope_name = scope_name
+        self.collection = collection
 
-    print('TPU devices:')
-    pprint.pprint(devices)
+    def _get_name(self, name):
+        name = name[:name.rindex('/')]
+        name = name[name.rindex('/') + 1:]
+        return name
+
+    def sequential(self, input, ops, include_input=False):
+        prev_op = input
+
+        x = str("")
+
+        if include_input:
+            self[self._get_name(prev_op.name)] = prev_op
+
+        for operation in ops:
+            prev_op = operation(prev_op)
+            name = self._get_name(prev_op.name)
+            self[name] = prev_op
+            new_op = True
+
+        return prev_op
+
+    def __enter__(self):
+        self.scope = tf.name_scope(self.scope_name)
+        self.scope.__enter__()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.scope.__exit__(type, value, traceback)
+
+        if FLAGS.debug:
+            print(f'printing {self.scope_name} dimensions')
+            for k, v in self.items():
+                print(f'{k}: {v.shape}')
+            print('')
+
+        for (key, var) in self.items():
+            variable_summaries(key, var, self.collection)
+
+
+def define_flags():
+    reset = False  # @param {type: "boolean"}
+    if (not reset) and FLAGS.is_set:
+        return
+
+    FLAGS.is_set = True
+
+    FLAGS.epochs = 20
+    FLAGS.train_steps = 600
+    FLAGS.batch_size = 32  # @param {type: "number"}
+    FLAGS.local = 'COLAB_TPU_ADDR' not in os.environ
+    FLAGS.learning_rate = 1e-3
+    FLAGS.summary_frequency = 100  # @param {type: "number"}
+
+    if FLAGS.local:
+        FLAGS.directory = 'out'
+        FLAGS.data = 'data/cifar10'
+        FLAGS.tpu_address = None
+        FLAGS.summaries_dir = 'local/summaries'
+        FLAGS.debug = True
+
+        print('running locally')
+    else:
+        print('mounting google drive')
+        from google.colab import drive
+        drive.mount('/gdrive')
+
+        FLAGS.directory = '/gdrive/My Drive/data_mnist'
+
+        summaries_dir = 'summaries'  # @param {type: "string"}
+        FLAGS.summaries_dir = f'/gdrive/My Drive/{summaries_dir}'
+        FLAGS.data = 'cifar-10-batches-py'
+        FLAGS.tpu_address = 'grpc://' + os.environ['COLAB_TPU_ADDR']
+        FLAGS.debug = False
+
+        print('TPU address is', FLAGS.tpu_address)
+
+        with tf.Session(FLAGS.tpu_address) as session:
+            devices = session.list_devices()
+
+        print('TPU devices:')
+        pprint.pprint(devices)
+
+        subprocess.Popen(
+            "kill $(ps -A | grep tensorboard | grep -o '^[0-9]\\+')",
+            shell=True,
+            stdout=subprocess.PIPE,
+            stdin=subprocess.PIPE
+        ) .communicate()
+
+        subprocess.Popen(
+            "kill $(ps -A | grep lt | grep -o '^[0-9]\\+')",
+            shell=True,
+            stdout=subprocess.PIPE,
+            stdin=subprocess.PIPE
+        ) .communicate()
+
+        subprocess.Popen(
+            f"rm '{URL_LOG}'",
+            shell=True,
+        )
+
+        print(subprocess.Popen(
+            f"npm install -g localtunnel; lt --port 6006 -s yiblet > {URL_LOG} 2>&1 &",
+            shell=True,
+            stdout=subprocess.PIPE,
+            stdin=subprocess.PIPE
+        ).communicate()[0].decode('ascii'))
+
+        subprocess.Popen(
+            f"rm -r '{FLAGS.summaries_dir}'",
+            shell=True,
+        ).wait()
+
+        subprocess.Popen(
+            f"tensorboard --logdir '{FLAGS.summaries_dir}' --host 0.0.0.0 >> tensorboard.log 2>&1 &",
+            shell=True,
+        )
+
 
 tf.reset_default_graph()
 
@@ -61,110 +184,184 @@ def parse_cifar(file):
     return data
 
 
-def construct_vae(original_dim, hidden=16, z_dims=16, learning_rate=1e-3):
-    x_input = tf.placeholder(tf.float32, shape=[None, *original_dim])
-    z_input = tf.placeholder(tf.float32, shape=[None, z_dims])
+def construct_vae(original_dim, hidden=16, z_dims=2):
+    import tensorflow_probability as tfp
+    tfd = tfp.distributions
 
-    with tf.variable_scope('Q'):
-        conv_1 = tf.layers.conv2d(
-            x_input,
-            3,
-            [2, 2],
-            name='conv_1',
-            activation=tf.nn.relu
-        )
-        conv_2 = tf.layers.conv2d(
-            conv_1,
-            16,
-            [2, 2],
-            (2, 2),
-            name='conv_2',
-            activation=tf.nn.relu
-        )
-        conv_3 = tf.layers.conv2d(
-            conv_2,
-            16,
-            [2, 2],
-            name='conv_3',
-            activation=tf.nn.relu
-        )
-        conv_4 = tf.layers.conv2d(
-            conv_3,
-            16,
-            [2, 2],
-            name='conv_4',
-            activation=tf.nn.relu
-        )
-
-    out = tf.layers.flatten(conv_4)
-
-    latent = tf.layers.dense(out, hidden, activation=tf.nn.relu)
-
-    z_mu = tf.layers.dense(latent, z_dims, activation=None)
-    z_log_var = tf.layers.dense(latent, z_dims, activation=None)
-    epsilon = tf.random_normal(shape=tf.shape(
-        z_log_var), mean=0, stddev=1, dtype=tf.float32)
-
-    z = z_mu + tf.exp(z_log_var / 2.0) * epsilon
-
-    def generator(z):
-        with tf.variable_scope('P', reuse=tf.AUTO_REUSE):
-            hidden_0 = tf.layers.dense(z, hidden, activation=tf.nn.relu)
-            hidden_0 = tf.layers.dense(
-                hidden_0, 13 * 13 * 32, activation=tf.nn.relu)
-            hidden_0 = tf.reshape(hidden_0, (-1, 13, 13, 32))
-
-            decon_1 = tf.layers.conv2d_transpose(
-                hidden_0,
-                16,
-                [2, 2],
-                strides=(1, 1),
-                name='decon_1',
-                activation=tf.nn.relu
+    def make_encoder(data, code_size):
+        with SummaryScope('Q-probability') as scope:
+            x = tf.reshape(data, (-1, 28, 28, 1))
+            x = scope.sequential(
+                x,
+                [
+                    lambda x: tf.layers.conv2d(
+                        x,
+                        32,
+                        [2, 2],
+                        [2, 2],
+                        name='conv_1',
+                        activation=tf.nn.relu
+                    ),
+                    lambda x: tf.layers.conv2d(
+                        x,
+                        128,
+                        [2, 2],
+                        [2, 2],
+                        name='conv_2',
+                        activation=tf.nn.relu
+                    ),
+                    lambda x: tf.layers.conv2d(
+                        x,
+                        128,
+                        [2, 2],
+                        [1, 1],
+                        name='conv_3',
+                        activation=tf.nn.relu
+                    ),
+                    lambda x: tf.layers.conv2d(
+                        x,
+                        128,
+                        [2, 2],
+                        [2, 2],
+                        name='conv_4',
+                        activation=tf.nn.relu
+                    ),
+                    lambda x: tf.layers.conv2d(
+                        x,
+                        16,
+                        [1, 1],
+                        [1, 1],
+                        name='conv_5',
+                        activation=tf.nn.relu
+                    )
+                ],
             )
-            decon_2 = tf.layers.conv2d_transpose(
-                decon_1,
-                16,
-                [3, 3],
-                strides=(2, 2),
-                name='decon_2',
-                activation=tf.nn.relu
+
+            latent = tf.reshape(x, (-1, np.prod(x.get_shape().as_list()[1:])))
+
+        with SummaryScope('z-probability') as scope:
+            loc = tf.layers.dense(latent, code_size, name='loc')
+            scope['loc'] = loc
+            scale = tf.layers.dense(
+                latent, code_size,  tf.nn.softplus, name='scale')
+            scope['scale'] = scale
+
+        return tfd.MultivariateNormalDiag(loc, scale)
+
+    def make_prior(code_size):
+        loc = tf.zeros(code_size)
+        scale = tf.ones(code_size)
+        return tfd.MultivariateNormalDiag(loc, scale)
+
+    def make_decoder(code, data_shape):
+        with SummaryScope('P-probability') as scope:
+            x = scope.sequential(
+                code,
+                [
+                    lambda x: tf.layers.dense(
+                        x,
+                        5*5,
+                        name='dense',
+                        activation=tf.nn.relu
+                    ),
+                    lambda x: tf.layers.conv2d_transpose(
+                        tf.reshape(x, (-1, 5, 5, 1)),
+                        64,
+                        [3, 3],
+                        strides=(1, 1),
+                        name='decon_1',
+                        activation=tf.nn.relu
+                    ),
+                    lambda x: tf.layers.conv2d_transpose(
+                        x,
+                        64,
+                        [3, 3],
+                        strides=(1, 1),
+                        name='decon_2',
+                        activation=tf.nn.relu
+                    ),
+                    lambda x: tf.layers.conv2d_transpose(
+                        x,
+                        64,
+                        [3, 3],
+                        strides=(1, 1),
+                        name='decon_3',
+                        activation=tf.nn.relu
+                    ),
+                    lambda x: tf.layers.conv2d_transpose(
+                        x,
+                        64,
+                        [3, 3],
+                        strides=(1, 1),
+                        name='decon_4',
+                        activation=tf.nn.relu
+                    ),
+                    lambda x: tf.layers.conv2d_transpose(
+                        x,
+                        1,
+                        [4, 4],
+                        strides=(2, 2),
+                        name='decon_5',
+                        activation=None
+                    )
+                ]
             )
-            decon_3 = tf.layers.conv2d_transpose(
-                decon_2,
-                16,
-                [3, 3],
-                strides=(1, 1),
-                name='decon_3',
-                activation=tf.nn.relu
-            )
-            decon_4 = tf.layers.conv2d_transpose(
-                decon_3,
-                3,
-                [2, 2],
-                name='decon_4',
-                activation=None
-            )
-            return (tf.nn.sigmoid(decon_4), decon_4)
 
-    _, x_hat = generator(z)
-    x_gen, _ = generator(z_input)
+            x = tf.reshape(x, (-1, 28**2))
 
-    print(x_hat, x_input)
+        with SummaryScope('logit') as scope:
+            logit = x
+            # tf.layers.dense(x, np.prod(data_shape))
+            logit = tf.reshape(logit, [-1] + data_shape)
+            scope['logit'] = logit
 
-    recon_loss = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(
-        logits=x_hat, labels=x_input), axis=[1, 2, 3]
-    ) * WIDTH * HEIGHT * CHANNEL
+        return tfd.Independent(tfd.Bernoulli(logit), z_dims)
 
-    latent_loss = -0.5 * tf.reduce_sum(
-        1 + z_log_var - tf.square(z_mu) - tf.exp(z_log_var), axis=1
-    )
+    data = tf.placeholder(tf.float32, [None, 28, 28])
 
-    total_loss = tf.reduce_mean(recon_loss + latent_loss)
-    train_op = tf.train.AdamOptimizer(
-        learning_rate=learning_rate).minimize(total_loss)
+    make_encoder = tf.make_template('encoder', make_encoder)
+    make_decoder = tf.make_template('decoder', make_decoder)
 
-    return (x_input, z_input, x_gen, x_hat, total_loss, train_op)
+    # Define the model.
+    prior = make_prior(code_size=z_dims)
+    posterior = make_encoder(data, code_size=z_dims)
+    code = posterior.sample()
+
+    # Define the loss.
+    with SummaryScope('losses') as scope:
+        likelihood = make_decoder(code, [28, 28]).log_prob(data)
+        scope['likelihood'] = likelihood
+        divergence = tfd.kl_divergence(posterior, prior)
+        scope['divergence'] = divergence
+        elbo = tf.reduce_mean(likelihood - divergence)
+        scope['elbo'] = elbo
+
+    optimize = tf.train.AdamOptimizer(FLAGS.learning_rate).minimize(-elbo)
+
+    samples = make_decoder(prior.sample(10), [28, 28]).mean()
+
+    merged = tf.summary.merge_all()
+
+    images = tf.summary.image('samples', tf.reshape(
+        samples, (-1, 28, 28, 1)), max_outputs=10)
+
+    return (data, elbo, code, samples, optimize, merged, images)
+
+
+def plot_codes(ax, codes, labels):
+    ax.scatter(codes[:, 0], codes[:, 1], s=2, c=labels, alpha=0.1)
+    ax.set_aspect('equal')
+    ax.set_xlim(codes.min() - .1, codes.max() + .1)
+    ax.set_ylim(codes.min() - .1, codes.max() + .1)
+    ax.tick_params(
+        axis='both', which='both', left='off', bottom='off',
+        labelleft='off', labelbottom='off')
+
+
+def plot_samples(ax, samples):
+    for index, sample in enumerate(samples):
+        ax[index].imshow(sample, cmap='gray')
+        ax[index].axis('off')
 
 
 def rgb2gray(rgb):
@@ -176,133 +373,171 @@ def plot(samples):
     gs = gridspec.GridSpec(4, 4)
     gs.update(wspace=0.05, hspace=0.05)
 
+    samples = samples.reshape((-1, 28, 28))
+
     for i, sample in enumerate(samples):
         ax = plt.subplot(gs[i])
         plt.axis('off')
         ax.set_xticklabels([])
         ax.set_yticklabels([])
         ax.set_aspect('equal')
-        plt.imshow(sample)
+        plt.imshow(sample, cmap='Greys_r')
 
     return fig
 
 
+def count_parameters(scope=None):
+    return np.sum(
+        [np.prod(v.get_shape().as_list())
+         for v in tf.trainable_variables(scope=scope)
+         ])
+
+
+def print_param_count(scope=None):
+    if scope is not None:
+        count = count_parameters(scope=f".*{scope}")
+    else:
+        count = count_parameters()
+        scope = 'vae'
+    print(
+        f'number of parameters in {scope}: {count}'
+    )
+
+
 def main():
+    from tensorflow.examples.tutorials.mnist import input_data
+    (x_input, elbo, code, samples, optimize, merged, images) = construct_vae(
+        (HEIGHT, WIDTH, CHANNEL))
 
-    data = [
-        parse_cifar(f'{DATA}/data_batch_{i}')
-        for i in range(1, 6)
-    ]
+    print('---------------')
+    print_param_count()
+    print('---------------')
+    print_param_count('encoder')
+    print('---------------')
+    print_param_count('decoder')
+    print('---------------')
 
-    data = np.array(data)
-    data = data.reshape((-1, 32, 32, 3))
+    if FLAGS.debug:
+        sys.exit()
 
-    print(data.shape)
+    mnist = input_data.read_data_sets('MNIST_data/')
 
-    test = parse_cifar(f'{DATA}/test_batch')
-    print(test.shape)
-    epochs = 1
+    fig, ax = plt.subplots(nrows=20, ncols=11, figsize=(10, 20))
 
-    (x_input, z_input, x_gen, x_hat, total_loss,
-     train_op) = construct_vae((32, 32, 3))
-
-    if LOCAL:
+    if FLAGS.local:
         sess = tf.Session()
     else:
-        sess = tf.Session(TPU_ADDRESS)
+        sess = tf.Session(FLAGS.tpu_address)
 
-    data = data / 255.0
+    if os.path.exists(FLAGS.summaries_dir):
+        subprocess.run(['rm', '-r', FLAGS.summaries_dir])
+
+    train_writer = tf.summary.FileWriter(
+        FLAGS.summaries_dir + '/train',
+        sess.graph
+    )
+    test_writer = tf.summary.FileWriter(
+        FLAGS.summaries_dir + '/test'
+    )
 
     try:
         sess.run(tf.global_variables_initializer())
-        if not LOCAL:
+
+        if not FLAGS.local:
             print('Initializing TPUs...')
             sess.run(tf.contrib.tpu.initialize_system())
 
         print('Running ops')
 
-        if not os.path.exists(DIRECTORY):
-            os.mkdir(DIRECTORY)
+        try:
+            with (open(URL_LOG, 'r')) as log:
+                print(log.read())
+        except FileNotFoundError:
+            print('not running localtunnel')
 
-        for x in range(10000):
-            X_mb = data[np.random.choice(
-                data.shape[0], 1000, replace=False), ...]
-            _, loss = sess.run([train_op, total_loss],
-                               feed_dict={x_input: X_mb})
+        if not os.path.exists(FLAGS.directory):
+            os.mkdir(FLAGS.directory)
 
-            if (x % 100) == 0:
-                samples = sess.run(x_gen, feed_dict={
-                    z_input: np.random.randn(16, 16)})
-                fig = plot(samples)
-                plt.title(f'Epoch {x}')
-                plt.savefig(f'{DIRECTORY}/epoch_{x}.png')
-                if not LOCAL:
-                    plt.show()
-                plt.close()
+        for epoch in range(FLAGS.epochs):
+            feed = {
+                x_input: mnist.test.images
+                [np.random.choice(
+                    mnist.test.images.shape[0], 100, replace=False), ...]
+                .reshape([-1, 28, 28])
+            }
+
+            test_elbo, test_samples, summary, images_summary = sess.run(
+                [elbo, samples, merged, images],
+                feed
+            )
+            test_writer.add_summary(summary, FLAGS.train_steps * epoch)
+            test_writer.add_summary(images_summary, FLAGS.train_steps * epoch)
+            print(f'Epoch {epoch} elbo: {test_elbo}')
+
+            # training step
+            for train_step in range(FLAGS.train_steps):
+                feed = {
+                    x_input: mnist.train.images
+                    [np.random.choice(
+                        mnist.train.images.shape[0], FLAGS.batch_size, replace=False), ...]
+                    .reshape([-1, 28, 28])
+                }
+
+                global_step = FLAGS.train_steps * epoch + train_step
+                if global_step == 0:
+                    run_options = tf.RunOptions(
+                        trace_level=tf.RunOptions.FULL_TRACE)
+                    run_metadata = tf.RunMetadata()
+                    _, summary = sess.run(
+                        [optimize, merged],
+                        feed,
+                        options=run_options,
+                        run_metadata=run_metadata
+                    )
+                    train_writer.add_summary(
+                        summary, global_step)
+                    train_writer.add_run_metadata(
+                        run_metadata,
+                        f'step {global_step}',
+                        global_step=global_step
+                    )
+                elif train_step % FLAGS.summary_frequency == 0:
+                    _, summary = sess.run([optimize, merged], feed)
+                    train_writer.add_summary(summary, global_step)
+                else:
+                    sess.run([optimize], feed)
 
     finally:
         # For now, TPU sessions must be shutdown separately from
         # closing the session.
-        sess.run(tf.contrib.tpu.shutdown_system())
+        if not FLAGS.local:
+            sess.run(tf.contrib.tpu.shutdown_system())
         sess.close()
 
+    # def make_encoder(data, code_size):
+    #     x = tf.layers.flatten(data)
+    #     x = tf.layers.dense(x, 200, tf.nn.relu)
+    #     x = tf.layers.dense(x, 200, tf.nn.relu)
+    #     loc = tf.layers.dense(x, code_size)
+    #     scale = tf.layers.dense(x, code_size, tf.nn.softplus)
+    #     return tfd.MultivariateNormalDiag(loc, scale)
 
-def compress(arg):
-    placeholder = tf.placeholder(tf.float32, shape=[None, 64, 64, 3])
+    # def make_prior(code_size):
+    #     loc = tf.zeros(code_size)
+    #     scale = tf.ones(code_size)
+    #     return tfd.MultivariateNormalDiag(loc, scale)
 
-    channels = {
-        'input': 3,
-        'h1': 18,
-        'h2': 1,
-        'h3': 6,
-        'output': 3,
-    }
-
-    variables = {
-        'encoder_h1': tf.Variable(tf.truncated_normal(
-            [5, 5, channels['input'], channels['h1']],
-            stddev=0.01)
-        ),
-        'encoder_h2': tf.Variable(tf.truncated_normal(
-            [5, 5, channels['h1'], channels['h2']], stddev=0.01)
-        ),
-        'decoder_h3': tf.Variable(tf.truncated_normal(
-            [5, 5, channels['h2'], channels['h3']], stddev=0.01)
-        ),
-        'decoder_h4': tf.Variable(tf.truncated_normal(
-            [5, 5, channels['h3'], channels['output']], stddev=0.01)
-        ),
-    }
-
-    biases = {
-        'encoder_h1_biases': tf.Variable(tf.truncated_normal(
-            [channels['h1']],
-            stddev=0.01)
-        ),
-        'encoder_h2_biases': tf.Variable(tf.truncated_normal(
-            [channels['h2']], stddev=0.01)
-        ),
-        'decoder_h3_biases': tf.Variable(tf.truncated_normal(
-            [channels['h3']], stddev=0.01)
-        ),
-        'decoder_h4_biases': tf.Variable(tf.truncated_normal(
-            [channels['output']], stddev=0.01)
-        ),
-    }
-
-    output = model(placeholder)
-    print(output)
-    pass
-
-
-def contract(images):
-    if get_image_dims(images)[0] == 2:
-        return [images]
-    smaller_images = resize(images)
-    contracted_images = contract(smaller_images)
-    smaller_images = contracted_images[-1]
-    compress(images - upsize_images(smaller_images))
+    # def make_decoder(code, data_shape):
+    #     x = code
+    #     x = tf.layers.dense(x, 200, tf.nn.relu)
+    #     x = tf.layers.dense(x, 200, tf.nn.relu)
+    #     logit = tf.layers.dense(x, np.prod(data_shape))
+    #     logit = tf.reshape(logit, [-1] + data_shape)
+    #     return tfd.Independent(tfd.Bernoulli(logit), z_dims)
 
 
 if __name__ == "__main__":
+    # environment initalization
+    define_flags()
+    # running
     main()
