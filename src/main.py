@@ -10,9 +10,11 @@ import types
 import subprocess
 import sys
 
-WIDTH = 28
+WIDTH = 32
 HEIGHT = WIDTH
-CHANNEL = 1
+CHANNEL = 3
+
+DIM = (HEIGHT, WIDTH, CHANNEL)
 
 URL_LOG = 'url.txt'
 
@@ -20,6 +22,90 @@ DEFAULT_SUMMARY_COLLECTION = 'summaries'
 
 FLAGS = types.SimpleNamespace()
 FLAGS.is_set = False
+
+
+def define_flags():
+    reset = False  # @param {type: "boolean"}
+    if (not reset) and FLAGS.is_set:
+        return
+
+    FLAGS.is_set = True
+
+    FLAGS.epochs = 500  # @param {type: "number"}
+    FLAGS.train_steps = 600  # @param {type: "number"}
+    FLAGS.batch_size = 64  # @param {type: "number"}
+    FLAGS.local = 'COLAB_TPU_ADDR' not in os.environ
+    FLAGS.learning_rate = 1e-3  # @param {type: "number"}
+    FLAGS.summary_frequency = 100  # @param {type: "number"}
+    FLAGS.z_dims = 64  # @param {type: "number"}
+
+    if FLAGS.local:
+        FLAGS.directory = 'out'
+        FLAGS.data = 'data/cifar10'
+        FLAGS.tpu_address = None
+        FLAGS.summaries_dir = 'local/summaries'
+        FLAGS.debug = True
+
+        print('running locally')
+    else:
+        print('mounting google drive')
+        from google.colab import drive
+        drive.mount('/gdrive')
+
+        FLAGS.directory = '/gdrive/My Drive/data_mnist'
+
+        summaries_dir = 'summaries'  # @param {type: "string"}
+        FLAGS.summaries_dir = f'/gdrive/My Drive/{summaries_dir}'
+        FLAGS.data = '/gdrive/My Drive/cifar10'
+        FLAGS.tpu_address = 'grpc://' + os.environ['COLAB_TPU_ADDR']
+        FLAGS.debug = False
+
+        print('TPU address is', FLAGS.tpu_address)
+
+        with tf.Session(FLAGS.tpu_address) as session:
+            devices = session.list_devices()
+
+        print('TPU devices:')
+        pprint.pprint(devices)
+
+        subprocess.Popen(
+            "kill $(ps -A | grep tensorboard | grep -o '^[0-9]\\+')",
+            shell=True,
+            stdout=subprocess.PIPE,
+            stdin=subprocess.PIPE
+        ) .communicate()
+
+        subprocess.Popen(
+            "kill $(ps -A | grep lt | grep -o '^[0-9]\\+')",
+            shell=True,
+            stdout=subprocess.PIPE,
+            stdin=subprocess.PIPE
+        ) .communicate()
+
+        subprocess.Popen(
+            f"rm '{URL_LOG}'",
+            shell=True,
+        )
+
+        print(subprocess.Popen(
+            f"npm install -g localtunnel; lt --port 6006 -s yiblet > {URL_LOG} 2>&1 &",
+            shell=True,
+            stdout=subprocess.PIPE,
+            stdin=subprocess.PIPE
+        ).communicate()[0].decode('ascii'))
+
+        subprocess.Popen(
+            f"rm -r '{FLAGS.summaries_dir}'",
+            shell=True,
+        ).wait()
+
+        subprocess.Popen(
+            f"tensorboard --logdir '{FLAGS.summaries_dir}' --host 0.0.0.0 >> tensorboard.log 2>&1 &",
+            shell=True,
+        )
+
+
+tf.reset_default_graph()
 
 
 def variable_summaries(key, var, collection):
@@ -80,92 +166,9 @@ class SummaryScope(dict):
             variable_summaries(key, var, self.collection)
 
 
-def define_flags():
-    reset = False  # @param {type: "boolean"}
-    if (not reset) and FLAGS.is_set:
-        return
-
-    FLAGS.is_set = True
-
-    FLAGS.epochs = 20
-    FLAGS.train_steps = 600
-    FLAGS.batch_size = 32  # @param {type: "number"}
-    FLAGS.local = 'COLAB_TPU_ADDR' not in os.environ
-    FLAGS.learning_rate = 1e-3
-    FLAGS.summary_frequency = 100  # @param {type: "number"}
-
-    if FLAGS.local:
-        FLAGS.directory = 'out'
-        FLAGS.data = 'data/cifar10'
-        FLAGS.tpu_address = None
-        FLAGS.summaries_dir = 'local/summaries'
-        FLAGS.debug = True
-
-        print('running locally')
-    else:
-        print('mounting google drive')
-        from google.colab import drive
-        drive.mount('/gdrive')
-
-        FLAGS.directory = '/gdrive/My Drive/data_mnist'
-
-        summaries_dir = 'summaries'  # @param {type: "string"}
-        FLAGS.summaries_dir = f'/gdrive/My Drive/{summaries_dir}'
-        FLAGS.data = 'cifar-10-batches-py'
-        FLAGS.tpu_address = 'grpc://' + os.environ['COLAB_TPU_ADDR']
-        FLAGS.debug = False
-
-        print('TPU address is', FLAGS.tpu_address)
-
-        with tf.Session(FLAGS.tpu_address) as session:
-            devices = session.list_devices()
-
-        print('TPU devices:')
-        pprint.pprint(devices)
-
-        subprocess.Popen(
-            "kill $(ps -A | grep tensorboard | grep -o '^[0-9]\\+')",
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE
-        ) .communicate()
-
-        subprocess.Popen(
-            "kill $(ps -A | grep lt | grep -o '^[0-9]\\+')",
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE
-        ) .communicate()
-
-        subprocess.Popen(
-            f"rm '{URL_LOG}'",
-            shell=True,
-        )
-
-        print(subprocess.Popen(
-            f"npm install -g localtunnel; lt --port 6006 -s yiblet > {URL_LOG} 2>&1 &",
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE
-        ).communicate()[0].decode('ascii'))
-
-        subprocess.Popen(
-            f"rm -r '{FLAGS.summaries_dir}'",
-            shell=True,
-        ).wait()
-
-        subprocess.Popen(
-            f"tensorboard --logdir '{FLAGS.summaries_dir}' --host 0.0.0.0 >> tensorboard.log 2>&1 &",
-            shell=True,
-        )
-
-
-tf.reset_default_graph()
-
-
 def unpickle(file):
     import pickle
-    with open(file, 'rb') as fo:
+    with open(f'{FLAGS.data}/{file}', 'rb') as fo:
         dict = pickle.load(fo, encoding='bytes')
     return dict
 
@@ -181,16 +184,23 @@ def parse_cifar(file):
     data = data.reshape([-1, image_depth, image_height, image_width])
     data = data.transpose([0, 2, 3, 1])
     data = data.astype(np.float32)
-    return data
+    return data / 255.0
 
 
-def construct_vae(original_dim, hidden=16, z_dims=2):
+def load_data():
+    x_input = [parse_cifar(f'data_batch_{i}') for i in range(1, 6)]
+    x_input = np.array(x_input).reshape([-1, *DIM])
+    test_input = parse_cifar('test_batch')
+    return (x_input, test_input)
+
+
+def construct_vae(original_dim, z_dims=32):
     import tensorflow_probability as tfp
     tfd = tfp.distributions
 
     def make_encoder(data, code_size):
         with SummaryScope('Q-probability') as scope:
-            x = tf.reshape(data, (-1, 28, 28, 1))
+            x = tf.reshape(data, (-1, *original_dim))
             x = scope.sequential(
                 x,
                 [
@@ -204,7 +214,7 @@ def construct_vae(original_dim, hidden=16, z_dims=2):
                     ),
                     lambda x: tf.layers.conv2d(
                         x,
-                        128,
+                        256,
                         [2, 2],
                         [2, 2],
                         name='conv_2',
@@ -212,15 +222,15 @@ def construct_vae(original_dim, hidden=16, z_dims=2):
                     ),
                     lambda x: tf.layers.conv2d(
                         x,
-                        128,
+                        512,
                         [2, 2],
-                        [1, 1],
+                        [2, 2],
                         name='conv_3',
                         activation=tf.nn.relu
                     ),
                     lambda x: tf.layers.conv2d(
                         x,
-                        128,
+                        512,
                         [2, 2],
                         [2, 2],
                         name='conv_4',
@@ -228,10 +238,18 @@ def construct_vae(original_dim, hidden=16, z_dims=2):
                     ),
                     lambda x: tf.layers.conv2d(
                         x,
-                        16,
-                        [1, 1],
-                        [1, 1],
+                        256,
+                        [2, 2],
+                        [2, 2],
                         name='conv_5',
+                        activation=tf.nn.relu
+                    ),
+                    lambda x: tf.layers.conv2d(
+                        x,
+                        128,
+                        [1, 1],
+                        [1, 1],
+                        name='conv_6',
                         activation=tf.nn.relu
                     )
                 ],
@@ -258,66 +276,65 @@ def construct_vae(original_dim, hidden=16, z_dims=2):
             x = scope.sequential(
                 code,
                 [
-                    lambda x: tf.layers.dense(
-                        x,
-                        5*5,
-                        name='dense',
-                        activation=tf.nn.relu
-                    ),
                     lambda x: tf.layers.conv2d_transpose(
-                        tf.reshape(x, (-1, 5, 5, 1)),
-                        64,
-                        [3, 3],
-                        strides=(1, 1),
+                        tf.reshape(x, (-1, 1, 1, z_dims)),
+                        128,
+                        [2, 2],
+                        strides=(2, 2),
                         name='decon_1',
                         activation=tf.nn.relu
                     ),
                     lambda x: tf.layers.conv2d_transpose(
                         x,
-                        64,
-                        [3, 3],
-                        strides=(1, 1),
+                        128,
+                        [2, 2],
+                        strides=(2, 2),
                         name='decon_2',
                         activation=tf.nn.relu
                     ),
                     lambda x: tf.layers.conv2d_transpose(
                         x,
-                        64,
-                        [3, 3],
-                        strides=(1, 1),
+                        256,
+                        [2, 2],
+                        strides=(2, 2),
                         name='decon_3',
                         activation=tf.nn.relu
                     ),
                     lambda x: tf.layers.conv2d_transpose(
                         x,
-                        64,
-                        [3, 3],
-                        strides=(1, 1),
+                        512,
+                        [2, 2],
+                        strides=(2, 2),
                         name='decon_4',
                         activation=tf.nn.relu
                     ),
                     lambda x: tf.layers.conv2d_transpose(
                         x,
-                        1,
-                        [4, 4],
+                        512,
+                        [2, 2],
                         strides=(2, 2),
                         name='decon_5',
+                        activation=tf.nn.relu
+                    ),
+                    lambda x: tf.layers.conv2d_transpose(
+                        x,
+                        3,
+                        [1, 1],
+                        strides=(1, 1),
+                        name='decon_6',
                         activation=None
-                    )
+                    ),
                 ]
             )
 
-            x = tf.reshape(x, (-1, 28**2))
-
         with SummaryScope('logit') as scope:
-            logit = x
-            # tf.layers.dense(x, np.prod(data_shape))
-            logit = tf.reshape(logit, [-1] + data_shape)
+            logit = tf.reshape(x, [-1, *data_shape])
             scope['logit'] = logit
 
-        return tfd.Independent(tfd.Bernoulli(logit), z_dims)
+        res = tfd.Independent(tfd.Bernoulli(logit))
+        return res
 
-    data = tf.placeholder(tf.float32, [None, 28, 28])
+    data = tf.placeholder(tf.float32, [None, *original_dim])
 
     make_encoder = tf.make_template('encoder', make_encoder)
     make_decoder = tf.make_template('decoder', make_decoder)
@@ -329,7 +346,7 @@ def construct_vae(original_dim, hidden=16, z_dims=2):
 
     # Define the loss.
     with SummaryScope('losses') as scope:
-        likelihood = make_decoder(code, [28, 28]).log_prob(data)
+        likelihood = make_decoder(code, original_dim).log_prob(data)
         scope['likelihood'] = likelihood
         divergence = tfd.kl_divergence(posterior, prior)
         scope['divergence'] = divergence
@@ -338,12 +355,11 @@ def construct_vae(original_dim, hidden=16, z_dims=2):
 
     optimize = tf.train.AdamOptimizer(FLAGS.learning_rate).minimize(-elbo)
 
-    samples = make_decoder(prior.sample(10), [28, 28]).mean()
+    samples = make_decoder(prior.sample(10), original_dim).mean()
 
     merged = tf.summary.merge_all()
 
-    images = tf.summary.image('samples', tf.reshape(
-        samples, (-1, 28, 28, 1)), max_outputs=10)
+    images = tf.summary.image('samples', samples, max_outputs=10)
 
     return (data, elbo, code, samples, optimize, merged, images)
 
@@ -405,9 +421,11 @@ def print_param_count(scope=None):
 
 
 def main():
-    from tensorflow.examples.tutorials.mnist import input_data
+    original_dim = (HEIGHT, WIDTH, CHANNEL)
     (x_input, elbo, code, samples, optimize, merged, images) = construct_vae(
-        (HEIGHT, WIDTH, CHANNEL))
+        original_dim,
+        z_dims=FLAGS.z_dims
+    )
 
     print('---------------')
     print_param_count()
@@ -417,12 +435,10 @@ def main():
     print_param_count('decoder')
     print('---------------')
 
+    train, test = load_data()
+
     if FLAGS.debug:
         sys.exit()
-
-    mnist = input_data.read_data_sets('MNIST_data/')
-
-    fig, ax = plt.subplots(nrows=20, ncols=11, figsize=(10, 20))
 
     if FLAGS.local:
         sess = tf.Session()
@@ -460,10 +476,9 @@ def main():
 
         for epoch in range(FLAGS.epochs):
             feed = {
-                x_input: mnist.test.images
-                [np.random.choice(
-                    mnist.test.images.shape[0], 100, replace=False), ...]
-                .reshape([-1, 28, 28])
+                x_input: test[np.random.choice(
+                    test.shape[0], 100, replace=False), ...]
+                .reshape([-1, *original_dim])
             }
 
             test_elbo, test_samples, summary, images_summary = sess.run(
@@ -477,10 +492,10 @@ def main():
             # training step
             for train_step in range(FLAGS.train_steps):
                 feed = {
-                    x_input: mnist.train.images
+                    x_input: train
                     [np.random.choice(
-                        mnist.train.images.shape[0], FLAGS.batch_size, replace=False), ...]
-                    .reshape([-1, 28, 28])
+                        train.shape[0], FLAGS.batch_size, replace=False), ...]
+                    .reshape([-1, *original_dim])
                 }
 
                 global_step = FLAGS.train_steps * epoch + train_step
@@ -513,27 +528,6 @@ def main():
         if not FLAGS.local:
             sess.run(tf.contrib.tpu.shutdown_system())
         sess.close()
-
-    # def make_encoder(data, code_size):
-    #     x = tf.layers.flatten(data)
-    #     x = tf.layers.dense(x, 200, tf.nn.relu)
-    #     x = tf.layers.dense(x, 200, tf.nn.relu)
-    #     loc = tf.layers.dense(x, code_size)
-    #     scale = tf.layers.dense(x, code_size, tf.nn.softplus)
-    #     return tfd.MultivariateNormalDiag(loc, scale)
-
-    # def make_prior(code_size):
-    #     loc = tf.zeros(code_size)
-    #     scale = tf.ones(code_size)
-    #     return tfd.MultivariateNormalDiag(loc, scale)
-
-    # def make_decoder(code, data_shape):
-    #     x = code
-    #     x = tf.layers.dense(x, 200, tf.nn.relu)
-    #     x = tf.layers.dense(x, 200, tf.nn.relu)
-    #     logit = tf.layers.dense(x, np.prod(data_shape))
-    #     logit = tf.reshape(logit, [-1] + data_shape)
-    #     return tfd.Independent(tfd.Bernoulli(logit), z_dims)
 
 
 if __name__ == "__main__":
