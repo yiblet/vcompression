@@ -31,9 +31,9 @@ def define_flags():
 
     FLAGS.is_set = True
 
-    FLAGS.epochs = 500  # @param {type: "number"}
+    FLAGS.epochs = 1000  # @param {type: "number"}
     FLAGS.train_steps = 600  # @param {type: "number"}
-    FLAGS.batch_size = 64  # @param {type: "number"}
+    FLAGS.batch_size = 16  # @param {type: "number"}
     FLAGS.local = 'COLAB_TPU_ADDR' not in os.environ
     FLAGS.learning_rate = 1e-3  # @param {type: "number"}
     FLAGS.summary_frequency = 100  # @param {type: "number"}
@@ -222,7 +222,7 @@ def construct_vae(original_dim, z_dims=32):
                     ),
                     lambda x: tf.layers.conv2d(
                         x,
-                        512,
+                        256,
                         [2, 2],
                         [2, 2],
                         name='conv_3',
@@ -230,7 +230,7 @@ def construct_vae(original_dim, z_dims=32):
                     ),
                     lambda x: tf.layers.conv2d(
                         x,
-                        512,
+                        256,
                         [2, 2],
                         [2, 2],
                         name='conv_4',
@@ -302,7 +302,7 @@ def construct_vae(original_dim, z_dims=32):
                     ),
                     lambda x: tf.layers.conv2d_transpose(
                         x,
-                        512,
+                        256,
                         [2, 2],
                         strides=(2, 2),
                         name='decon_4',
@@ -310,7 +310,7 @@ def construct_vae(original_dim, z_dims=32):
                     ),
                     lambda x: tf.layers.conv2d_transpose(
                         x,
-                        512,
+                        256,
                         [2, 2],
                         strides=(2, 2),
                         name='decon_5',
@@ -357,11 +357,36 @@ def construct_vae(original_dim, z_dims=32):
 
     samples = make_decoder(prior.sample(10), original_dim).mean()
 
+    random_sub_batch_dims = tf.random_uniform(
+        [10],
+        minval=0,
+        maxval=tf.shape(code,  out_type=tf.int32)[0],
+        dtype=tf.int32,
+    )
+
+    code_random_sub_batch = tf.gather(code, random_sub_batch_dims)
+    data_random_sub_batch = tf.gather(data, random_sub_batch_dims)
+
+    generated = make_decoder(code_random_sub_batch, original_dim).mean()
+
     merged = tf.summary.merge_all()
 
-    images = tf.summary.image('samples', samples, max_outputs=10)
+    sample_summary = tf.summary.image(
+        'samples',
+        samples,
+        max_outputs=10
+    )
 
-    return (data, elbo, code, samples, optimize, merged, images)
+    image_comparison = tf.concat([data_random_sub_batch, generated], 1)
+    comparison_summary = tf.summary.image(
+        'comparison',
+        image_comparison,
+        max_outputs=10
+    )
+
+    images_summary = tf.summary.merge([sample_summary, comparison_summary])
+
+    return (data, elbo, code, samples, optimize, merged, images_summary)
 
 
 def plot_codes(ax, codes, labels):
@@ -435,10 +460,10 @@ def main():
     print_param_count('decoder')
     print('---------------')
 
-    train, test = load_data()
-
     if FLAGS.debug:
         sys.exit()
+
+    train, test = load_data()
 
     if FLAGS.local:
         sess = tf.Session()
