@@ -234,7 +234,6 @@ def construct_vae(original_dim):
                         [2, 2],
                         name='conv_2',
                         activation=None,
-                        _reuse=True,
                     ),
                     tf.layers.BatchNormalization(),
                     tf.keras.layers.Activation('relu', name='relu_2'),
