@@ -1,4 +1,23 @@
 import tensorflow as tf
+import types
+
+
+class Namespace(types.SimpleNamespace):
+    """Docstring for Namespace. """
+
+    def __init__(self, **kwargs):
+        types.SimpleNamespace.__init__(self, **kwargs)
+
+    def __add__(self, other):
+        if (isinstance(other, types.SimpleNamespace)):
+            return Namespace(**self.__dict__, **other.__dict__)
+        else:
+            raise ValueError("not correct type")
+
+    def bulk_update(self, other):
+        if (isinstance(other, types.SimpleNamespace)):
+            for k, v in other.__dict__.items():
+                self.__dict__[k] = v
 
 
 def compress(arg):

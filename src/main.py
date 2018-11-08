@@ -1,4 +1,5 @@
-# @title The Big Ol' File { display-mode: "form" }
+# @title The Big File { display-mode: "form" }
+from __future__ import absolute_import
 import os
 import pprint
 import tensorflow as tf
@@ -6,9 +7,10 @@ from tensorflow import keras
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy as np
-import types
 import subprocess
 import sys
+import util
+import layers
 
 WIDTH = 32
 HEIGHT = WIDTH
@@ -20,31 +22,33 @@ URL_LOG = 'url.txt'
 
 DEFAULT_SUMMARY_COLLECTION = 'summaries'
 
-FLAGS = types.SimpleNamespace()
-FLAGS.is_set = False
+FLAGS = util.Namespace(is_set=False)
 
 
-def define_flags():
+def define_flags(additional_flags=None):
+    if additional_flags is not None:
+        FLAGS.bulk_update(additional_flags)
+
     reset = False  # @param {type: "boolean"}
     if (not reset) and FLAGS.is_set:
         return
 
-    FLAGS.is_set = True
-
-    FLAGS.epochs = 1000  # @param {type: "number"}
-    FLAGS.train_steps = 600  # @param {type: "number"}
     FLAGS.batch_size = 16  # @param {type: "number"}
-    FLAGS.local = 'COLAB_TPU_ADDR' not in os.environ
+    FLAGS.epochs = 1000  # @param {type: "number"}
+    FLAGS.is_set = True
     FLAGS.learning_rate = 1e-3  # @param {type: "number"}
-    FLAGS.summary_frequency = 100  # @param {type: "number"}
-    FLAGS.z_dims = 64  # @param {type: "number"}
+    FLAGS.summary_frequency = 200  # @param {type: "number"}
+    FLAGS.train_steps = 600  # @param {type: "number"}
+    FLAGS.z_dims = 128  # @param {type: "number"}
+    FLAGS.summarize = True
+    FLAGS.local = os.uname()[1] == 'XPS'
 
     if FLAGS.local:
-        FLAGS.directory = 'out'
         FLAGS.data = 'data/cifar10'
-        FLAGS.tpu_address = None
-        FLAGS.summaries_dir = 'local/summaries'
         FLAGS.debug = True
+        FLAGS.directory = 'out'
+        FLAGS.summaries_dir = 'local/summaries'
+        FLAGS.tpu_address = None
 
         print('running locally')
     else:
@@ -52,21 +56,23 @@ def define_flags():
         from google.colab import drive
         drive.mount('/gdrive')
 
+        FLAGS.data = '/gdrive/My Drive/cifar10'
+        FLAGS.debug = False
         FLAGS.directory = '/gdrive/My Drive/data_mnist'
-
         summaries_dir = 'summaries'  # @param {type: "string"}
         FLAGS.summaries_dir = f'/gdrive/My Drive/{summaries_dir}'
-        FLAGS.data = '/gdrive/My Drive/cifar10'
-        FLAGS.tpu_address = 'grpc://' + os.environ['COLAB_TPU_ADDR']
-        FLAGS.debug = False
+        FLAGS.tpu_address = None
 
-        print('TPU address is', FLAGS.tpu_address)
+        if 'COLAB_TPU_ADDR' in os.environ:
+            FLAGS.tpu_address = 'grpc://' + os.environ['COLAB_TPU_ADDR']
 
-        with tf.Session(FLAGS.tpu_address) as session:
-            devices = session.list_devices()
+            print('TPU address is', FLAGS.tpu_address)
 
-        print('TPU devices:')
-        pprint.pprint(devices)
+            with tf.Session(FLAGS.tpu_address) as session:
+                devices = session.list_devices()
+
+            print('TPU devices:')
+            pprint.pprint(devices)
 
         subprocess.Popen(
             "kill $(ps -A | grep tensorboard | grep -o '^[0-9]\\+')",
@@ -110,15 +116,19 @@ tf.reset_default_graph()
 
 def variable_summaries(key, var, collection):
     """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
+
     with tf.name_scope(f'{key}_summaries'):
-        mean = tf.reduce_mean(var)
-        with tf.name_scope('stddev'):
-            stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
-        tf.summary.scalar('mean', mean)
-        tf.summary.scalar('stddev', stddev)
-        tf.summary.scalar('max', tf.reduce_max(var))
-        tf.summary.scalar('min', tf.reduce_min(var))
-        tf.summary.histogram('histogram', var)
+        if not FLAGS.summarize:
+            tf.summary.histogram('histogram', var)
+        else:
+            mean = tf.reduce_mean(var)
+            with tf.name_scope('stddev'):
+                stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
+            tf.summary.scalar('max', tf.reduce_max(var))
+            tf.summary.scalar('mean', mean)
+            tf.summary.scalar('min', tf.reduce_min(var))
+            tf.summary.scalar('stddev', stddev)
+            tf.summary.histogram('histogram', var)
 
 
 class SummaryScope(dict):
@@ -194,141 +204,171 @@ def load_data():
     return (x_input, test_input)
 
 
-def construct_vae(original_dim, z_dims=32):
+def construct_vae(original_dim):
     import tensorflow_probability as tfp
     tfd = tfp.distributions
 
-    def make_encoder(data, code_size):
+    def make_encoder(data):
         with SummaryScope('Q-probability') as scope:
             x = tf.reshape(data, (-1, *original_dim))
             x = scope.sequential(
                 x,
                 [
-                    lambda x: tf.layers.conv2d(
-                        x,
-                        32,
+                    tf.layers.Conv2D(
+                        128,
                         [2, 2],
                         [2, 2],
                         name='conv_1',
+                        activation=None
+                    ),
+                    tf.layers.BatchNormalization(),
+                    tf.keras.layers.Activation('relu', name='relu_1'),
+                    layers.ResidualBlock(
+                        128,
+                        kernel=[3, 3],
                         activation=tf.nn.relu
                     ),
-                    lambda x: tf.layers.conv2d(
-                        x,
-                        256,
+                    tf.layers.Conv2D(
+                        128,
                         [2, 2],
                         [2, 2],
                         name='conv_2',
+                        activation=None,
+                        _reuse=True,
+                    ),
+                    tf.layers.BatchNormalization(),
+                    tf.keras.layers.Activation('relu', name='relu_2'),
+                    layers.ResidualBlock(
+                        128,
+                        kernel=[3, 3],
                         activation=tf.nn.relu
                     ),
-                    lambda x: tf.layers.conv2d(
-                        x,
-                        256,
+                    tf.layers.Conv2D(
+                        128,
                         [2, 2],
                         [2, 2],
                         name='conv_3',
+                        activation=None,
+                    ),
+                    tf.layers.BatchNormalization(),
+                    tf.keras.layers.Activation('relu', name='relu_3'),
+                    layers.ResidualBlock(
+                        128,
+                        kernel=[3, 3],
                         activation=tf.nn.relu
                     ),
-                    lambda x: tf.layers.conv2d(
-                        x,
-                        256,
+                    tf.layers.Conv2D(
+                        128,
                         [2, 2],
                         [2, 2],
                         name='conv_4',
-                        activation=tf.nn.relu
+                        activation=None,
                     ),
-                    lambda x: tf.layers.conv2d(
-                        x,
-                        256,
-                        [2, 2],
-                        [2, 2],
-                        name='conv_5',
-                        activation=tf.nn.relu
-                    ),
-                    lambda x: tf.layers.conv2d(
-                        x,
+                    tf.layers.BatchNormalization(),
+                    tf.keras.layers.Activation('relu', name='relu_4'),
+                    tf.layers.Conv2D(
                         128,
+                        [2, 2],
                         [1, 1],
-                        [1, 1],
-                        name='conv_6',
-                        activation=tf.nn.relu
-                    )
+                        name='conv_5',
+                        activation=tf.nn.relu,
+                    ),
                 ],
             )
 
             latent = tf.reshape(x, (-1, np.prod(x.get_shape().as_list()[1:])))
 
         with SummaryScope('z-probability') as scope:
-            loc = tf.layers.dense(latent, code_size, name='loc')
+            loc = tf.layers.dense(latent, FLAGS.z_dims, name='loc')
             scope['loc'] = loc
             scale = tf.layers.dense(
-                latent, code_size,  tf.nn.softplus, name='scale')
+                latent, FLAGS.z_dims,  tf.nn.softplus, name='scale')
             scope['scale'] = scale
 
         return tfd.MultivariateNormalDiag(loc, scale)
 
-    def make_prior(code_size):
-        loc = tf.zeros(code_size)
-        scale = tf.ones(code_size)
+    def make_prior():
+        loc = tf.zeros(FLAGS.z_dims)
+        scale = tf.ones(FLAGS.z_dims)
         return tfd.MultivariateNormalDiag(loc, scale)
 
-    def make_decoder(code, data_shape):
+    def make_decoder(code):
         with SummaryScope('P-probability') as scope:
             x = scope.sequential(
-                code,
+                tf.reshape(code, (-1, 1, 1, FLAGS.z_dims)),
                 [
-                    lambda x: tf.layers.conv2d_transpose(
-                        tf.reshape(x, (-1, 1, 1, z_dims)),
+                    tf.layers.Conv2DTranspose(
                         128,
                         [2, 2],
-                        strides=(2, 2),
-                        name='decon_1',
-                        activation=tf.nn.relu
+                        [1, 1],
+                        name='deconv_1',
+                        activation=None,
                     ),
-                    lambda x: tf.layers.conv2d_transpose(
-                        x,
+                    tf.layers.BatchNormalization(),
+                    tf.keras.layers.Activation('relu', name='relu_1'),
+                    tf.layers.Conv2DTranspose(
                         128,
                         [2, 2],
-                        strides=(2, 2),
-                        name='decon_2',
-                        activation=tf.nn.relu
-                    ),
-                    lambda x: tf.layers.conv2d_transpose(
-                        x,
-                        256,
                         [2, 2],
-                        strides=(2, 2),
-                        name='decon_3',
+                        name='deconv_2',
+                        activation=None,
+                    ),
+                    tf.layers.BatchNormalization(),
+                    tf.keras.layers.Activation('relu', name='relu_2'),
+                    layers.ResidualBlock(
+                        128,
+                        kernel=[3, 3],
                         activation=tf.nn.relu
                     ),
-                    lambda x: tf.layers.conv2d_transpose(
-                        x,
-                        256,
+                    tf.layers.Conv2DTranspose(
+                        128,
                         [2, 2],
-                        strides=(2, 2),
-                        name='decon_4',
-                        activation=tf.nn.relu
-                    ),
-                    lambda x: tf.layers.conv2d_transpose(
-                        x,
-                        256,
                         [2, 2],
-                        strides=(2, 2),
-                        name='decon_5',
+                        name='deconv_3',
+                        activation=None,
+                    ),
+                    tf.layers.BatchNormalization(),
+                    tf.keras.layers.Activation('relu', name='relu_3'),
+                    layers.ResidualBlock(
+                        128,
+                        kernel=[3, 3],
                         activation=tf.nn.relu
                     ),
-                    lambda x: tf.layers.conv2d_transpose(
-                        x,
+                    tf.layers.Conv2DTranspose(
+                        128,
+                        [2, 2],
+                        [2, 2],
+                        name='deconv_4',
+                        activation=None,
+                    ),
+                    tf.layers.BatchNormalization(),
+                    tf.keras.layers.Activation('relu', name='relu_4'),
+                    layers.ResidualBlock(
+                        128,
+                        kernel=[3, 3],
+                        activation=tf.nn.relu
+                    ),
+                    tf.layers.Conv2DTranspose(
+                        128,
+                        [2, 2],
+                        [2, 2],
+                        name='deconv_5',
+                        activation=None,
+                    ),
+                    tf.layers.BatchNormalization(),
+                    tf.keras.layers.Activation('relu', name='relu_5'),
+                    tf.layers.Conv2DTranspose(
                         3,
                         [1, 1],
-                        strides=(1, 1),
-                        name='decon_6',
-                        activation=None
+                        [1, 1],
+                        name='deconv_6',
+                        activation=None,
                     ),
                 ]
             )
 
         with SummaryScope('logit') as scope:
-            logit = tf.reshape(x, [-1, *data_shape])
+            logit = tf.reshape(x, [-1, *original_dim])
             scope['logit'] = logit
 
         res = tfd.Independent(tfd.Bernoulli(logit))
@@ -340,13 +380,13 @@ def construct_vae(original_dim, z_dims=32):
     make_decoder = tf.make_template('decoder', make_decoder)
 
     # Define the model.
-    prior = make_prior(code_size=z_dims)
-    posterior = make_encoder(data, code_size=z_dims)
+    prior = make_prior()
+    posterior = make_encoder(data)
     code = posterior.sample()
 
     # Define the loss.
     with SummaryScope('losses') as scope:
-        likelihood = make_decoder(code, original_dim).log_prob(data)
+        likelihood = make_decoder(code).log_prob(data)
         scope['likelihood'] = likelihood
         divergence = tfd.kl_divergence(posterior, prior)
         scope['divergence'] = divergence
@@ -355,7 +395,7 @@ def construct_vae(original_dim, z_dims=32):
 
     optimize = tf.train.AdamOptimizer(FLAGS.learning_rate).minimize(-elbo)
 
-    samples = make_decoder(prior.sample(10), original_dim).mean()
+    samples = make_decoder(prior.sample(10)).mean()
 
     random_sub_batch_dims = tf.random_uniform(
         [10],
@@ -367,7 +407,7 @@ def construct_vae(original_dim, z_dims=32):
     code_random_sub_batch = tf.gather(code, random_sub_batch_dims)
     data_random_sub_batch = tf.gather(data, random_sub_batch_dims)
 
-    generated = make_decoder(code_random_sub_batch, original_dim).mean()
+    generated = make_decoder(code_random_sub_batch).mean()
 
     merged = tf.summary.merge_all()
 
@@ -445,11 +485,23 @@ def print_param_count(scope=None):
     )
 
 
+def gdn(input):
+    return tf.contrib.layers.gdn(input)
+
+
+def inverse_gdn(input):
+    return tf.contrib.layers.gdn(input, inverse=True)
+
+
 def main():
     original_dim = (HEIGHT, WIDTH, CHANNEL)
+
+    print('-----FLAGS----')
+    pprint.pprint(FLAGS.__dict__)
+    print('--------------')
+
     (x_input, elbo, code, samples, optimize, merged, images) = construct_vae(
-        original_dim,
-        z_dims=FLAGS.z_dims
+        original_dim
     )
 
     print('---------------')
@@ -464,8 +516,9 @@ def main():
         sys.exit()
 
     train, test = load_data()
+    print(train.shape, test.shape)
 
-    if FLAGS.local:
+    if FLAGS.tpu_address is None:
         sess = tf.Session()
     else:
         sess = tf.Session(FLAGS.tpu_address)
@@ -484,7 +537,7 @@ def main():
     try:
         sess.run(tf.global_variables_initializer())
 
-        if not FLAGS.local:
+        if FLAGS.tpu_address is not None:
             print('Initializing TPUs...')
             sess.run(tf.contrib.tpu.initialize_system())
 
@@ -501,7 +554,8 @@ def main():
 
         for epoch in range(FLAGS.epochs):
             feed = {
-                x_input: test[np.random.choice(
+                x_input:
+                test[np.random.choice(
                     test.shape[0], 100, replace=False), ...]
                 .reshape([-1, *original_dim])
             }
@@ -550,13 +604,11 @@ def main():
     finally:
         # For now, TPU sessions must be shutdown separately from
         # closing the session.
-        if not FLAGS.local:
+        if FLAGS.tpu_address is not None:
             sess.run(tf.contrib.tpu.shutdown_system())
         sess.close()
 
 
 if __name__ == "__main__":
-    # environment initalization
     define_flags()
-    # running
     main()
