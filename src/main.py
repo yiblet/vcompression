@@ -11,6 +11,7 @@ import subprocess
 import sys
 import util
 import layers
+import retrieval
 
 WIDTH = 32
 HEIGHT = WIDTH
@@ -174,34 +175,6 @@ class SummaryScope(dict):
 
         for (key, var) in self.items():
             variable_summaries(key, var, self.collection)
-
-
-def unpickle(file):
-    import pickle
-    with open(f'{FLAGS.data}/{file}', 'rb') as fo:
-        dict = pickle.load(fo, encoding='bytes')
-    return dict
-
-
-def parse_cifar(file):
-    data = unpickle(file)
-    data = data[b'data']
-
-    image_depth = 3
-    image_height = 32
-    image_width = 32
-
-    data = data.reshape([-1, image_depth, image_height, image_width])
-    data = data.transpose([0, 2, 3, 1])
-    data = data.astype(np.float32)
-    return data / 255.0
-
-
-def load_data():
-    x_input = [parse_cifar(f'data_batch_{i}') for i in range(1, 6)]
-    x_input = np.array(x_input).reshape([-1, *DIM])
-    test_input = parse_cifar('test_batch')
-    return (x_input, test_input)
 
 
 def construct_vae(original_dim):
@@ -428,62 +401,6 @@ def construct_vae(original_dim):
     return (data, elbo, code, samples, optimize, merged, images_summary)
 
 
-def plot_codes(ax, codes, labels):
-    ax.scatter(codes[:, 0], codes[:, 1], s=2, c=labels, alpha=0.1)
-    ax.set_aspect('equal')
-    ax.set_xlim(codes.min() - .1, codes.max() + .1)
-    ax.set_ylim(codes.min() - .1, codes.max() + .1)
-    ax.tick_params(
-        axis='both', which='both', left='off', bottom='off',
-        labelleft='off', labelbottom='off')
-
-
-def plot_samples(ax, samples):
-    for index, sample in enumerate(samples):
-        ax[index].imshow(sample, cmap='gray')
-        ax[index].axis('off')
-
-
-def rgb2gray(rgb):
-    return np.dot(rgb[..., :3], [0.299, 0.587, 0.114])
-
-
-def plot(samples):
-    fig = plt.figure(figsize=(4, 4))
-    gs = gridspec.GridSpec(4, 4)
-    gs.update(wspace=0.05, hspace=0.05)
-
-    samples = samples.reshape((-1, 28, 28))
-
-    for i, sample in enumerate(samples):
-        ax = plt.subplot(gs[i])
-        plt.axis('off')
-        ax.set_xticklabels([])
-        ax.set_yticklabels([])
-        ax.set_aspect('equal')
-        plt.imshow(sample, cmap='Greys_r')
-
-    return fig
-
-
-def count_parameters(scope=None):
-    return np.sum(
-        [np.prod(v.get_shape().as_list())
-         for v in tf.trainable_variables(scope=scope)
-         ])
-
-
-def print_param_count(scope=None):
-    if scope is not None:
-        count = count_parameters(scope=f".*{scope}")
-    else:
-        count = count_parameters()
-        scope = 'vae'
-    print(
-        f'number of parameters in {scope}: {count}'
-    )
-
-
 def gdn(input):
     return tf.contrib.layers.gdn(input)
 
@@ -504,17 +421,17 @@ def main():
     )
 
     print('---------------')
-    print_param_count()
+    util.print_param_count()
     print('---------------')
-    print_param_count('encoder')
+    util.print_param_count('encoder')
     print('---------------')
-    print_param_count('decoder')
+    util.print_param_count('decoder')
     print('---------------')
 
     if FLAGS.debug:
         sys.exit()
 
-    train, test = load_data()
+    train, test = retrieval.load_data(FLAGS.data)
     print(train.shape, test.shape)
 
     if FLAGS.tpu_address is None:

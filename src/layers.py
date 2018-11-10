@@ -1,6 +1,24 @@
 import tensorflow as tf
 
 
+# class Compressor(tf.keras.layers.Layer):
+
+#     """Docstring for Compressor. """
+
+#     def __init__(
+#         self,
+#         numeric_range=(-1, 1),
+#         name=name,
+#     ):
+#         """TODO: to be defined1. """
+#         tf.keras.layers.Layer.__init__(self, name=name)
+#         self.numeric_range = numeric_range
+
+#     def build(self, input_shape):
+#         if len(input_shape != 4):
+#             raise ValueError('input needs to have rank 4')
+
+
 class ResidualBlock(tf.keras.layers.Layer):
     """Basic Residual Block"""
 

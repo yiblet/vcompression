@@ -1,7 +1,73 @@
 import tensorflow as tf
+import numpy as np
 import types
 
+# --- plotting
 
+
+def plot_codes(ax, codes, labels):
+    ax.scatter(codes[:, 0], codes[:, 1], s=2, c=labels, alpha=0.1)
+    ax.set_aspect('equal')
+    ax.set_xlim(codes.min() - .1, codes.max() + .1)
+    ax.set_ylim(codes.min() - .1, codes.max() + .1)
+    ax.tick_params(
+        axis='both', which='both', left='off', bottom='off',
+        labelleft='off', labelbottom='off')
+
+
+def plot_samples(ax, samples):
+    for index, sample in enumerate(samples):
+        ax[index].imshow(sample, cmap='gray')
+        ax[index].axis('off')
+
+
+def rgb2gray(rgb):
+    return np.dot(rgb[..., :3], [0.299, 0.587, 0.114])
+
+
+def plot(samples):
+    fig = plt.figure(figsize=(4, 4))
+    gs = gridspec.GridSpec(4, 4)
+    gs.update(wspace=0.05, hspace=0.05)
+
+    samples = samples.reshape((-1, 28, 28))
+
+    for i, sample in enumerate(samples):
+        ax = plt.subplot(gs[i])
+        plt.axis('off')
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        ax.set_aspect('equal')
+        plt.imshow(sample, cmap='Greys_r')
+
+    return fig
+
+# -- general utility functions
+
+
+def get(dictionary, *args):
+    return [dictionary[arg] for arg in args]
+
+
+def count_parameters(scope=None):
+    return np.sum(
+        [np.prod(v.get_shape().as_list())
+         for v in tf.trainable_variables(scope=scope)
+         ])
+
+
+def print_param_count(scope=None):
+    if scope is not None:
+        count = count_parameters(scope=f".*{scope}")
+    else:
+        count = count_parameters()
+        scope = 'vae'
+    print(
+        f'number of parameters in {scope}: {count}'
+    )
+
+
+# -- for tensorflow namespaces
 class Namespace(types.SimpleNamespace):
     """Docstring for Namespace. """
 
@@ -75,27 +141,6 @@ def contract(images):
     contracted_images = contract(smaller_images)
     smaller_images = contracted_images[-1]
     compress(images - upsize_images(smaller_images))
-
-
-def conv2d(x, W, b, strides=1):
-    # W: [A, B, in_channels, out_channels]
-    # Conv2D wrapper, with bias and relu activation
-    x = tf.nn.conv2d(x, W, strides=[1, strides, strides, 1], padding='SAME')
-    x = tf.nn.bias_add(x, b)
-    return tf.nn.relu(x)
-
-
-def deconv2d(x, W, b, out_shape, strides=1):
-    # W: [A, B, in_channels, out_channels]
-    x = tf.nn.conv2d_transpose(
-        x,
-        W,
-        out_shape,
-        strides=[1, strides, strides, 1],
-        padding='SAME'
-    )
-    x = tf.nn.bias_add(x, b)
-    return tf.nn.relu(x)
 
 
 def get_dims(tensor):
