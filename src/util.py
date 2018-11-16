@@ -1,3 +1,4 @@
+from __future__ import absolute_import
 import tensorflow as tf
 import numpy as np
 import types
@@ -65,25 +66,6 @@ def print_param_count(scope=None):
     print(
         f'number of parameters in {scope}: {count}'
     )
-
-
-# -- for tensorflow namespaces
-class Namespace(types.SimpleNamespace):
-    """Docstring for Namespace. """
-
-    def __init__(self, **kwargs):
-        types.SimpleNamespace.__init__(self, **kwargs)
-
-    def __add__(self, other):
-        if (isinstance(other, types.SimpleNamespace)):
-            return Namespace(**self.__dict__, **other.__dict__)
-        else:
-            raise ValueError("not correct type")
-
-    def bulk_update(self, other):
-        if (isinstance(other, types.SimpleNamespace)):
-            for k, v in other.__dict__.items():
-                self.__dict__[k] = v
 
 
 def compress(arg):

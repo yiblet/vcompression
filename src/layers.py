@@ -1,3 +1,5 @@
+from __future__ import absolute_import
+from global_variables import *
 import tensorflow as tf
 
 
@@ -18,7 +20,6 @@ import tensorflow as tf
 #         if len(input_shape != 4):
 #             raise ValueError('input needs to have rank 4')
 
-
 class ResidualBlock(tf.keras.layers.Layer):
     """Basic Residual Block"""
 
@@ -37,6 +38,9 @@ class ResidualBlock(tf.keras.layers.Layer):
         self.kernel = [3, 3]
 
     def build(self, input_shape):
+
+        if FLAGS.disable_residual_block:
+            return
 
         if len(input_shape) != 4:
             raise ValueError("input needs to have rank 4")
@@ -87,6 +91,9 @@ class ResidualBlock(tf.keras.layers.Layer):
             ]
 
     def call(self, input):
+        if FLAGS.disable_residual_block:
+            return input
+
         cur = input
         for layer in self.layers:
             if layer is not None:

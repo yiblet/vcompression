@@ -3,114 +3,15 @@ from __future__ import absolute_import
 import os
 import pprint
 import tensorflow as tf
-from tensorflow import keras
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 import numpy as np
 import subprocess
 import sys
+import entropy
+
+from global_variables import *
 import util
 import layers
 import retrieval
-
-WIDTH = 32
-HEIGHT = WIDTH
-CHANNEL = 3
-
-DIM = (HEIGHT, WIDTH, CHANNEL)
-
-URL_LOG = 'url.txt'
-
-DEFAULT_SUMMARY_COLLECTION = 'summaries'
-
-FLAGS = util.Namespace(is_set=False)
-
-
-def define_flags(additional_flags=None):
-    if additional_flags is not None:
-        FLAGS.bulk_update(additional_flags)
-
-    reset = False  # @param {type: "boolean"}
-    if (not reset) and FLAGS.is_set:
-        return
-
-    FLAGS.batch_size = 16  # @param {type: "number"}
-    FLAGS.epochs = 1000  # @param {type: "number"}
-    FLAGS.is_set = True
-    FLAGS.learning_rate = 1e-3  # @param {type: "number"}
-    FLAGS.summary_frequency = 200  # @param {type: "number"}
-    FLAGS.train_steps = 600  # @param {type: "number"}
-    FLAGS.z_dims = 128  # @param {type: "number"}
-    FLAGS.summarize = True
-    FLAGS.local = os.uname()[1] == 'XPS'
-
-    if FLAGS.local:
-        FLAGS.data = 'data/cifar10'
-        FLAGS.debug = True
-        FLAGS.directory = 'out'
-        FLAGS.summaries_dir = 'local/summaries'
-        FLAGS.tpu_address = None
-
-        print('running locally')
-    else:
-        print('mounting google drive')
-        from google.colab import drive
-        drive.mount('/gdrive')
-
-        FLAGS.data = '/gdrive/My Drive/cifar10'
-        FLAGS.debug = False
-        FLAGS.directory = '/gdrive/My Drive/data_mnist'
-        summaries_dir = 'summaries'  # @param {type: "string"}
-        FLAGS.summaries_dir = f'/gdrive/My Drive/{summaries_dir}'
-        FLAGS.tpu_address = None
-
-        if 'COLAB_TPU_ADDR' in os.environ:
-            FLAGS.tpu_address = 'grpc://' + os.environ['COLAB_TPU_ADDR']
-
-            print('TPU address is', FLAGS.tpu_address)
-
-            with tf.Session(FLAGS.tpu_address) as session:
-                devices = session.list_devices()
-
-            print('TPU devices:')
-            pprint.pprint(devices)
-
-        subprocess.Popen(
-            "kill $(ps -A | grep tensorboard | grep -o '^[0-9]\\+')",
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE
-        ) .communicate()
-
-        subprocess.Popen(
-            "kill $(ps -A | grep lt | grep -o '^[0-9]\\+')",
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE
-        ) .communicate()
-
-        subprocess.Popen(
-            f"rm '{URL_LOG}'",
-            shell=True,
-        )
-
-        print(subprocess.Popen(
-            f"npm install -g localtunnel; lt --port 6006 -s yiblet > {URL_LOG} 2>&1 &",
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE
-        ).communicate()[0].decode('ascii'))
-
-        subprocess.Popen(
-            f"rm -r '{FLAGS.summaries_dir}'",
-            shell=True,
-        ).wait()
-
-        subprocess.Popen(
-            f"tensorboard --logdir '{FLAGS.summaries_dir}' --host 0.0.0.0 >> tensorboard.log 2>&1 &",
-            shell=True,
-        )
-
 
 tf.reset_default_graph()
 
@@ -194,7 +95,6 @@ def construct_vae(original_dim):
                         name='conv_1',
                         activation=None
                     ),
-                    tf.layers.BatchNormalization(),
                     tf.keras.layers.Activation('relu', name='relu_1'),
                     layers.ResidualBlock(
                         128,
@@ -208,7 +108,6 @@ def construct_vae(original_dim):
                         name='conv_2',
                         activation=None,
                     ),
-                    tf.layers.BatchNormalization(),
                     tf.keras.layers.Activation('relu', name='relu_2'),
                     layers.ResidualBlock(
                         128,
@@ -222,7 +121,6 @@ def construct_vae(original_dim):
                         name='conv_3',
                         activation=None,
                     ),
-                    tf.layers.BatchNormalization(),
                     tf.keras.layers.Activation('relu', name='relu_3'),
                     layers.ResidualBlock(
                         128,
@@ -236,37 +134,54 @@ def construct_vae(original_dim):
                         name='conv_4',
                         activation=None,
                     ),
-                    tf.layers.BatchNormalization(),
                     tf.keras.layers.Activation('relu', name='relu_4'),
                     tf.layers.Conv2D(
                         128,
                         [2, 2],
                         [1, 1],
                         name='conv_5',
-                        activation=tf.nn.relu,
+                        activation=tf.nn.sigmoid,
                     ),
                 ],
             )
 
-            latent = tf.reshape(x, (-1, np.prod(x.get_shape().as_list()[1:])))
+            dims = np.prod(x.get_shape().as_list()[1:])
+            assert (dims == FLAGS.z_dims)
+            latent = tf.reshape(x, (-1, dims))
 
-        with SummaryScope('z-probability') as scope:
-            loc = tf.layers.dense(latent, FLAGS.z_dims, name='loc')
+        return latent
+
+    def make_latent_distribution():
+        with SummaryScope('latent_distributions') as scope:
+            categorical = tf.get_variable(
+                name='categorical_distribution',
+                shape=[FLAGS.categorical_dims],
+            )
+            categorical = tf.nn.softmax(categorical)
+            loc = tf.get_variable(
+                name='logistic_loc_variables',
+                shape=[FLAGS.categorical_dims],
+            )
+            scale = tf.nn.softplus(tf.get_variable(
+                name='logistic_scale_variables',
+                shape=[FLAGS.categorical_dims],
+            ))
+            scope['categorical'] = categorical
             scope['loc'] = loc
-            scale = tf.layers.dense(
-                latent, FLAGS.z_dims,  tf.nn.softplus, name='scale')
             scope['scale'] = scale
-
-        return tfd.MultivariateNormalDiag(loc, scale)
-
-    def make_prior():
-        loc = tf.zeros(FLAGS.z_dims)
-        scale = tf.ones(FLAGS.z_dims)
-        return tfd.MultivariateNormalDiag(loc, scale)
+            return tfd.MixtureSameFamily(
+                mixture_distribution=tfd.Categorical(
+                    probs=categorical
+                ),
+                components_distribution=tfd.Logistic(
+                    loc=loc,
+                    scale=scale,
+                ),
+            )
 
     def make_decoder(code):
         with SummaryScope('P-probability') as scope:
-            x = scope.sequential(
+            logit = scope.sequential(
                 tf.reshape(code, (-1, 1, 1, FLAGS.z_dims)),
                 [
                     tf.layers.Conv2DTranspose(
@@ -276,7 +191,6 @@ def construct_vae(original_dim):
                         name='deconv_1',
                         activation=None,
                     ),
-                    tf.layers.BatchNormalization(),
                     tf.keras.layers.Activation('relu', name='relu_1'),
                     tf.layers.Conv2DTranspose(
                         128,
@@ -285,7 +199,6 @@ def construct_vae(original_dim):
                         name='deconv_2',
                         activation=None,
                     ),
-                    tf.layers.BatchNormalization(),
                     tf.keras.layers.Activation('relu', name='relu_2'),
                     layers.ResidualBlock(
                         128,
@@ -299,7 +212,6 @@ def construct_vae(original_dim):
                         name='deconv_3',
                         activation=None,
                     ),
-                    tf.layers.BatchNormalization(),
                     tf.keras.layers.Activation('relu', name='relu_3'),
                     layers.ResidualBlock(
                         128,
@@ -313,7 +225,6 @@ def construct_vae(original_dim):
                         name='deconv_4',
                         activation=None,
                     ),
-                    tf.layers.BatchNormalization(),
                     tf.keras.layers.Activation('relu', name='relu_4'),
                     layers.ResidualBlock(
                         128,
@@ -327,7 +238,6 @@ def construct_vae(original_dim):
                         name='deconv_5',
                         activation=None,
                     ),
-                    tf.layers.BatchNormalization(),
                     tf.keras.layers.Activation('relu', name='relu_5'),
                     tf.layers.Conv2DTranspose(
                         3,
@@ -339,66 +249,74 @@ def construct_vae(original_dim):
                 ]
             )
 
-        with SummaryScope('logit') as scope:
-            logit = tf.reshape(x, [-1, *original_dim])
-            scope['logit'] = logit
-
-        res = tfd.Independent(tfd.Bernoulli(logit))
-        return res
+        return tf.nn.relu(logit)
 
     data = tf.placeholder(tf.float32, [None, *original_dim])
 
     make_encoder = tf.make_template('encoder', make_encoder)
     make_decoder = tf.make_template('decoder', make_decoder)
+    make_latent_distribution = tf.make_template(
+        'distribution', make_latent_distribution
+    )
+
+    distribution = make_latent_distribution()
 
     # Define the model.
-    prior = make_prior()
-    posterior = make_encoder(data)
-    code = posterior.sample()
+    latent = make_encoder(data)
+
+    stopped_latents = tf.stop_gradient(latent)
+    likelihoods = distribution.cdf(stopped_latents + 0.5 / 255) - \
+        distribution.cdf(stopped_latents - 0.5 / 255)
+
+    # entropy_bottleneck = entropy.entropy_models.EntropyBottleneck()
+    # latent_tilde, likelihoods = entropy_bottleneck(latent, training=True)
+
+    x_tilde = make_decoder(latent)
+
+    num_pixels = original_dim[0] * original_dim[1]
 
     # Define the loss.
     with SummaryScope('losses') as scope:
-        likelihood = make_decoder(code).log_prob(data)
-        scope['likelihood'] = likelihood
-        divergence = tfd.kl_divergence(posterior, prior)
-        scope['divergence'] = divergence
-        elbo = tf.reduce_mean(likelihood - divergence)
-        scope['elbo'] = elbo
+        train_bpp = tf.reduce_mean(tf.log(likelihoods))
+        train_bpp /= -np.log(2) * num_pixels
+        train_mse = tf.reduce_mean(tf.squared_difference(data, x_tilde))
+        train_mse *= 255 ** 2 / num_pixels
+        train_loss = train_mse * 0.1 + train_bpp
+        scope['bpp'] = train_bpp
+        scope['mse'] = train_mse
+        scope['loss'] = train_loss
 
-    optimize = tf.train.AdamOptimizer(FLAGS.learning_rate).minimize(-elbo)
-
-    samples = make_decoder(prior.sample(10)).mean()
+    main_step = tf.train.AdamOptimizer(
+        FLAGS.learning_rate).minimize(train_loss)
 
     random_sub_batch_dims = tf.random_uniform(
         [10],
         minval=0,
-        maxval=tf.shape(code,  out_type=tf.int32)[0],
+        maxval=tf.shape(data,  out_type=tf.int32)[0],
         dtype=tf.int32,
     )
 
-    code_random_sub_batch = tf.gather(code, random_sub_batch_dims)
+    latent_random_sub_batch = tf.gather(latent, random_sub_batch_dims)
     data_random_sub_batch = tf.gather(data, random_sub_batch_dims)
 
-    generated = make_decoder(code_random_sub_batch).mean()
+    generated = make_decoder(latent_random_sub_batch)
 
     merged = tf.summary.merge_all()
 
-    sample_summary = tf.summary.image(
-        'samples',
-        samples,
-        max_outputs=10
-    )
-
-    image_comparison = tf.concat([data_random_sub_batch, generated], 1)
+    image_comparison = tf.concat([data_random_sub_batch, generated], 2)
     comparison_summary = tf.summary.image(
         'comparison',
         image_comparison,
         max_outputs=10
     )
 
-    images_summary = tf.summary.merge([sample_summary, comparison_summary])
+    # aux_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
+    # aux_step = aux_optimizer.minimize(entropy_bottleneck.losses[0])
+    train_op = tf.group(main_step)
 
-    return (data, elbo, code, samples, optimize, merged, images_summary)
+    images_summary = tf.summary.merge([comparison_summary])
+
+    return (data, train_loss, latent, train_op, merged, images_summary)
 
 
 def gdn(input):
@@ -410,14 +328,12 @@ def inverse_gdn(input):
 
 
 def main():
-    original_dim = (HEIGHT, WIDTH, CHANNEL)
-
     print('-----FLAGS----')
     pprint.pprint(FLAGS.__dict__)
     print('--------------')
 
-    (x_input, elbo, code, samples, optimize, merged, images) = construct_vae(
-        original_dim
+    (x_input, elbo, code, optimize, merged, images) = construct_vae(
+        DIM
     )
 
     print('---------------')
@@ -431,8 +347,7 @@ def main():
     if FLAGS.debug:
         sys.exit()
 
-    train, test = retrieval.load_data(FLAGS.data)
-    print(train.shape, test.shape)
+    train, test = retrieval.load_data()
 
     if FLAGS.tpu_address is None:
         sess = tf.Session()
@@ -449,6 +364,7 @@ def main():
     test_writer = tf.summary.FileWriter(
         FLAGS.summaries_dir + '/test'
     )
+    print(f"logging at {FLAGS.summaries_dir}")
 
     try:
         sess.run(tf.global_variables_initializer())
@@ -473,11 +389,11 @@ def main():
                 x_input:
                 test[np.random.choice(
                     test.shape[0], 100, replace=False), ...]
-                .reshape([-1, *original_dim])
+                .reshape([-1, *DIM])
             }
 
-            test_elbo, test_samples, summary, images_summary = sess.run(
-                [elbo, samples, merged, images],
+            test_elbo, summary, images_summary = sess.run(
+                [elbo, merged, images],
                 feed
             )
             test_writer.add_summary(summary, FLAGS.train_steps * epoch)
@@ -490,7 +406,7 @@ def main():
                     x_input: train
                     [np.random.choice(
                         train.shape[0], FLAGS.batch_size, replace=False), ...]
-                    .reshape([-1, *original_dim])
+                    .reshape([-1, *DIM])
                 }
 
                 global_step = FLAGS.train_steps * epoch + train_step
