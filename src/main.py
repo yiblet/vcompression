@@ -275,7 +275,7 @@ def main():
     print('---------------')
 
     if FLAGS.debug:
-        sys.exit()
+        return
 
     train, test = retrieval.load_data()
 
