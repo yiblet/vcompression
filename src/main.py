@@ -17,13 +17,14 @@ import retrieval
 tf.reset_default_graph()
 
 
-def construct_vae(original_dim):
+def construct_vae(original_dim, hidden_depth=3):
     import tensorflow_probability as tfp
     tfd = tfp.distributions
 
     def make_encoder(data):
         with summary.SummaryScope('Q-probability') as scope:
             x = tf.reshape(data, (-1, *original_dim))
+            scope['input'] = x
             x = scope.sequential(
                 x,
                 [
@@ -71,24 +72,12 @@ def construct_vae(original_dim):
                         [2, 2],
                         [2, 2],
                         name='conv_4',
-                        activation=None,
-                    ),
-                    tf.keras.layers.Activation('relu', name='relu_4'),
-                    tf.layers.Conv2D(
-                        128,
-                        [2, 2],
-                        [1, 1],
-                        name='conv_5',
                         activation=tf.nn.sigmoid,
                     ),
                 ],
             )
 
-            dims = np.prod(x.get_shape().as_list()[1:])
-            assert (dims == FLAGS.z_dims)
-            latent = tf.reshape(x, (-1, dims))
-
-        return latent
+        return x
 
     def make_latent_distribution():
         with summary.SummaryScope('latent_distributions') as scope:
@@ -108,29 +97,23 @@ def construct_vae(original_dim):
             scope['categorical'] = categorical
             scope['loc'] = loc
             scope['scale'] = scale
+
             return tfd.MixtureSameFamily(
                 mixture_distribution=tfd.Categorical(
                     probs=categorical
                 ),
-                components_distribution=tfd.Logistic(
+                components_distribution=tfd.Normal(
                     loc=loc,
                     scale=scale,
-                ),
+                )
             )
 
     def make_decoder(code):
         with summary.SummaryScope('P-probability') as scope:
+            scope['input'] = code
             logit = scope.sequential(
-                tf.reshape(code, (-1, 1, 1, FLAGS.z_dims)),
+                code,
                 [
-                    tf.layers.Conv2DTranspose(
-                        128,
-                        [2, 2],
-                        [1, 1],
-                        name='deconv_1',
-                        activation=None,
-                    ),
-                    tf.keras.layers.Activation('relu', name='relu_1'),
                     tf.layers.Conv2DTranspose(
                         128,
                         [2, 2],
@@ -190,6 +173,18 @@ def construct_vae(original_dim):
 
         return tf.nn.relu(logit)
 
+    @tf.custom_gradient
+    def quantize(latent):
+        expand = latent * 128.0
+        expand = tf.clip_by_value(expand, -128, 128)
+        expand = tf.round(expand)
+        expand /= 128.0
+
+        def grad(dy):
+            return dy * (1 - tf.cos(128.0 * np.pi * latent))
+
+        return expand, grad
+
     data = tf.placeholder(tf.float32, [None, *original_dim])
 
     make_encoder = tf.make_template('encoder', make_encoder)
@@ -201,11 +196,18 @@ def construct_vae(original_dim):
     distribution = make_latent_distribution()
 
     # Define the model.
-    latent = make_encoder(data)
+    latent = make_encoder(data)  # (batch, z_dims, hidden_depth)
+    latent = quantize(latent)
 
     stopped_latents = tf.stop_gradient(latent)
-    likelihoods = distribution.cdf(stopped_latents + 0.5 / 255) - \
-        distribution.cdf(stopped_latents - 0.5 / 255)
+    likelihoods = distribution.prob(stopped_latents)
+
+    with summary.SummaryScope('samples') as scope:
+        samples = tf.layers.flatten(stopped_latents)
+        scope['latent_samples'] = samples
+        scope['distribution_samples'] = distribution.sample(
+            samples.get_shape()[-1]
+        )
 
     # entropy_bottleneck = entropy.entropy_models.EntropyBottleneck()
     # latent_tilde, likelihoods = entropy_bottleneck(latent, training=True)
@@ -216,7 +218,9 @@ def construct_vae(original_dim):
 
     # Define the loss.
     with summary.SummaryScope('losses') as scope:
-        train_bpp = tf.reduce_mean(tf.log(likelihoods))
+        train_bpp = tf.reduce_mean(tf.reduce_sum(
+            tf.log(likelihoods), axis=[1, 2])
+        )
         train_bpp /= -np.log(2) * num_pixels
         train_mse = tf.reduce_mean(tf.squared_difference(data, x_tilde))
         train_mse *= 255 ** 2 / num_pixels
@@ -294,14 +298,25 @@ def main():
         sess = tf.Session(FLAGS.tpu_address)
 
     if os.path.exists(FLAGS.summaries_dir):
-        subprocess.run(['rm', '-r', FLAGS.summaries_dir])
+        subprocess.Popen(
+            f'rm -r {FLAGS.summaries_dir}/{FLAGS.test_dir}_{FLAGS.run_type}',
+            shell=True,
+            stdout=subprocess.PIPE,
+            stdin=subprocess.PIPE
+        ).communicate()
+        subprocess.Popen(
+            f'rm -r {FLAGS.summaries_dir}/{FLAGS.train_dir}_{FLAGS.run_type}',
+            shell=True,
+            stdout=subprocess.PIPE,
+            stdin=subprocess.PIPE
+        ).communicate()
 
     train_writer = tf.summary.FileWriter(
-        FLAGS.summaries_dir + '/train',
+        f'{FLAGS.summaries_dir}/{FLAGS.train_dir}_{FLAGS.run_type}',
         sess.graph
     )
     test_writer = tf.summary.FileWriter(
-        FLAGS.summaries_dir + '/test'
+        f'{FLAGS.summaries_dir}/{FLAGS.test_dir}_{FLAGS.run_type}',
     )
     print(f"logging at {FLAGS.summaries_dir}")
 

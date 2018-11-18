@@ -77,11 +77,6 @@ def run_subprocesses():
         ).communicate()[0].decode('ascii'))
 
         subprocess.Popen(
-            f"rm -r '{FLAGS.summaries_dir}'",
-            shell=True,
-        ).wait()
-
-        subprocess.Popen(
             f"tensorboard --logdir '{FLAGS.summaries_dir}' --port {FLAGS.tensorboard_port} --host 0.0.0.0 >> tensorboard.log 2>&1 &",
             shell=True,
         )
@@ -92,7 +87,7 @@ def define_flags(additional_flags=None):
     if (not reset) and FLAGS.is_set:
         return
 
-    FLAGS.categorical_dims = 3
+    FLAGS.categorical_dims = 5
     FLAGS.batch_size = 16  # @param {type: "number"}
     FLAGS.epochs = 1000  # @param {type: "number"}
     FLAGS.is_set = True
@@ -105,10 +100,13 @@ def define_flags(additional_flags=None):
     FLAGS.disable_residual_block = True
     FLAGS.tunnel_loc = 'yiblet'  # @param
     FLAGS.tensorboard_port = 8080  # @param {type : "number"}
+    FLAGS.run_type = 'primary'
+    FLAGS.test_dir = 'test'
+    FLAGS.train_dir = 'train'
 
     if FLAGS.local:
         FLAGS.data = 'data/cifar10'
-        FLAGS.debug = True
+        FLAGS.debug = False
         FLAGS.directory = 'out'
         FLAGS.summaries_dir = 'local/summaries'
         FLAGS.tpu_address = None
