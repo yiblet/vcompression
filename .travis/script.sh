@@ -1,6 +1,2 @@
 #!/bin/sh
-if ! [ -x "$(command -v fd)" ]; then
-    alias fd=fdfind
-fi
-
-pytest --workers auto "$(fd 'test_\w*.py$')"
+pytest --workers auto "$(git grep -l 'test' | grep 'test_.*py$')"
