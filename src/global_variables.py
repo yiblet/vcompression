@@ -102,13 +102,16 @@ def define_flags(additional_flags=None):
     FLAGS.train_steps = 600    # @param {type: "number"}
     FLAGS.z_dims = 128    # @param {type: "number"}
     FLAGS.summarize = True
-    FLAGS.local = os.uname()[1] == 'XPS'
+
     FLAGS.disable_residual_block = True
     FLAGS.tunnel_loc = 'yiblet'    # @param
     FLAGS.tensorboard_port = 8080    # @param {type : "number"}
     FLAGS.run_type = 'primary'
     FLAGS.test_dir = 'test'
     FLAGS.train_dir = 'train'
+
+    if not hasattr(FLAGS, 'local'):
+        FLAGS.local = os.uname()[1] == 'XPS'
 
     if FLAGS.local:
         FLAGS.data = 'data/cifar10'
