@@ -7,6 +7,7 @@ import main
 def define_additional_flags():
     FLAGS = Namespace()
     FLAGS.debug = True
+    FLAGS.local = True
     main.define_flags(additional_flags=FLAGS)
 
 
