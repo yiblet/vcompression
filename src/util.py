@@ -12,8 +12,13 @@ def plot_codes(ax, codes, labels):
     ax.set_xlim(codes.min() - .1, codes.max() + .1)
     ax.set_ylim(codes.min() - .1, codes.max() + .1)
     ax.tick_params(
-        axis='both', which='both', left='off', bottom='off',
-        labelleft='off', labelbottom='off')
+        axis='both',
+        which='both',
+        left='off',
+        bottom='off',
+        labelleft='off',
+        labelbottom='off'
+    )
 
 
 def plot_samples(ax, samples):
@@ -43,6 +48,7 @@ def plot(samples):
 
     return fig
 
+
 # -- general utility functions
 
 
@@ -51,10 +57,10 @@ def get(dictionary, *args):
 
 
 def count_parameters(scope=None):
-    return np.sum(
-        [np.prod(v.get_shape().as_list())
-         for v in tf.trainable_variables(scope=scope)
-         ])
+    return np.sum([
+        np.prod(v.get_shape().as_list())
+        for v in tf.trainable_variables(scope=scope)
+    ])
 
 
 def print_param_count(scope=None):
@@ -63,9 +69,7 @@ def print_param_count(scope=None):
     else:
         count = count_parameters()
         scope = 'vae'
-    print(
-        f'number of parameters in {scope}: {count}'
-    )
+    print(f'number of parameters in {scope}: {count}')
 
 
 def compress(arg):
@@ -80,35 +84,37 @@ def compress(arg):
     }
 
     variables = {
-        'encoder_h1': tf.Variable(tf.truncated_normal(
-            [5, 5, channels['input'], channels['h1']],
-            stddev=0.01)
+        'encoder_h1':
+        tf.Variable(
+            tf.truncated_normal([5, 5, channels['input'], channels['h1']],
+                                stddev=0.01)
         ),
-        'encoder_h2': tf.Variable(tf.truncated_normal(
-            [5, 5, channels['h1'], channels['h2']], stddev=0.01)
+        'encoder_h2':
+        tf.Variable(
+            tf.truncated_normal([5, 5, channels['h1'], channels['h2']],
+                                stddev=0.01)
         ),
-        'decoder_h3': tf.Variable(tf.truncated_normal(
-            [5, 5, channels['h2'], channels['h3']], stddev=0.01)
+        'decoder_h3':
+        tf.Variable(
+            tf.truncated_normal([5, 5, channels['h2'], channels['h3']],
+                                stddev=0.01)
         ),
-        'decoder_h4': tf.Variable(tf.truncated_normal(
-            [5, 5, channels['h3'], channels['output']], stddev=0.01)
+        'decoder_h4':
+        tf.Variable(
+            tf.truncated_normal([5, 5, channels['h3'], channels['output']],
+                                stddev=0.01)
         ),
     }
 
     biases = {
-        'encoder_h1_biases': tf.Variable(tf.truncated_normal(
-            [channels['h1']],
-            stddev=0.01)
-        ),
-        'encoder_h2_biases': tf.Variable(tf.truncated_normal(
-            [channels['h2']], stddev=0.01)
-        ),
-        'decoder_h3_biases': tf.Variable(tf.truncated_normal(
-            [channels['h3']], stddev=0.01)
-        ),
-        'decoder_h4_biases': tf.Variable(tf.truncated_normal(
-            [channels['output']], stddev=0.01)
-        ),
+        'encoder_h1_biases':
+        tf.Variable(tf.truncated_normal([channels['h1']], stddev=0.01)),
+        'encoder_h2_biases':
+        tf.Variable(tf.truncated_normal([channels['h2']], stddev=0.01)),
+        'decoder_h3_biases':
+        tf.Variable(tf.truncated_normal([channels['h3']], stddev=0.01)),
+        'decoder_h4_biases':
+        tf.Variable(tf.truncated_normal([channels['output']], stddev=0.01)),
     }
 
     output = model(placeholder)

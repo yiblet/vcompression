@@ -7,8 +7,6 @@ from global_variables import *
 
 
 def variable_summaries(key, var, collection=DEFAULT_SUMMARY_COLLECTION):
-    """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
-
     with tf.name_scope(f'{key}_summaries'):
         if not FLAGS.summarize:
             tf.summary.histogram('histogram', var)
@@ -24,6 +22,7 @@ def variable_summaries(key, var, collection=DEFAULT_SUMMARY_COLLECTION):
 
 
 class SummaryScope(dict):
+
     def __init__(self, scope_name, collection=DEFAULT_SUMMARY_COLLECTION):
         super()
         self.scope_name = scope_name

@@ -15,15 +15,14 @@ loc = tf.get_variable(
     name='logistic_loc_variables',
     shape=[3],
 )
-scale = tf.nn.softplus(tf.get_variable(
-    name='logistic_scale_variables',
-    shape=[3],
-))
+scale = tf.nn.softplus(
+    tf.get_variable(
+        name='logistic_scale_variables',
+        shape=[3],
+    ))
 
 mixture = tfd.MixtureSameFamily(
-    mixture_distribution=tfd.Categorical(
-        probs=categorical
-    ),
+    mixture_distribution=tfd.Categorical(probs=categorical),
     components_distribution=tfd.Logistic(
         loc=loc,
         scale=scale,

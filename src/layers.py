@@ -2,7 +2,6 @@ from __future__ import absolute_import
 from global_variables import *
 import tensorflow as tf
 
-
 # class Compressor(tf.keras.layers.Layer):
 
 #     """Docstring for Compressor. """
@@ -20,6 +19,7 @@ import tensorflow as tf
 #         if len(input_shape != 4):
 #             raise ValueError('input needs to have rank 4')
 
+
 class ResidualBlock(tf.keras.layers.Layer):
     """Basic Residual Block"""
 
@@ -29,6 +29,7 @@ class ResidualBlock(tf.keras.layers.Layer):
         kernel=[3, 3],
         activation=None,
         name=None,
+        use_batch_norm=False,
         batch_norm_last=True,
     ):
         tf.keras.layers.Layer.__init__(self, name=name)
@@ -52,8 +53,12 @@ class ResidualBlock(tf.keras.layers.Layer):
         elif not isinstance(activation, list):
             activation = [activation, activation, activation]
 
+        create_batch_norm = None
+        if use_batch_norm:
+            create_batch_norm = tf.layers.BatchNormalization
+
         last_batch_norm = None
-        if not self.batch_norm_last:
+        if use_batch_norm and (not self.batch_norm_last):
             last_batch_norm = tf.layers.BatchNormalization()
 
         with tf.name_scope(self.name):
@@ -66,7 +71,7 @@ class ResidualBlock(tf.keras.layers.Layer):
                     activation=None,
                     padding="same",
                 ),
-                tf.layers.BatchNormalization(),
+                create_batch_norm,
                 activation[0],
                 tf.layers.Conv2D(
                     self.channels,
@@ -76,7 +81,7 @@ class ResidualBlock(tf.keras.layers.Layer):
                     activation=None,
                     padding="same",
                 ),
-                tf.layers.BatchNormalization(),
+                create_batch_norm,
                 activation[1],
                 tf.layers.Conv2D(
                     self.channels,

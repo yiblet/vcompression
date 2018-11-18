@@ -17,7 +17,7 @@ import retrieval
 tf.reset_default_graph()
 
 
-def construct_vae(original_dim, hidden_depth=3):
+def construct_vae(original_dim, channel, hidden_depth=3):
     import tensorflow_probability as tfp
     tfd = tfp.distributions
 
@@ -29,20 +29,14 @@ def construct_vae(original_dim, hidden_depth=3):
                 x,
                 [
                     tf.layers.Conv2D(
-                        128,
-                        [2, 2],
-                        [2, 2],
-                        name='conv_1',
-                        activation=None
+                        channel, [2, 2], [2, 2], name='conv_1', activation=None
                     ),
                     tf.keras.layers.Activation('relu', name='relu_1'),
                     layers.ResidualBlock(
-                        128,
-                        kernel=[3, 3],
-                        activation=tf.nn.relu
+                        channel, kernel=[3, 3], activation=tf.nn.relu
                     ),
                     tf.layers.Conv2D(
-                        128,
+                        channel,
                         [2, 2],
                         [2, 2],
                         name='conv_2',
@@ -50,12 +44,10 @@ def construct_vae(original_dim, hidden_depth=3):
                     ),
                     tf.keras.layers.Activation('relu', name='relu_2'),
                     layers.ResidualBlock(
-                        128,
-                        kernel=[3, 3],
-                        activation=tf.nn.relu
+                        channel, kernel=[3, 3], activation=tf.nn.relu
                     ),
                     tf.layers.Conv2D(
-                        128,
+                        channel,
                         [2, 2],
                         [2, 2],
                         name='conv_3',
@@ -63,12 +55,10 @@ def construct_vae(original_dim, hidden_depth=3):
                     ),
                     tf.keras.layers.Activation('relu', name='relu_3'),
                     layers.ResidualBlock(
-                        128,
-                        kernel=[3, 3],
-                        activation=tf.nn.relu
+                        channel, kernel=[3, 3], activation=tf.nn.relu
                     ),
                     tf.layers.Conv2D(
-                        128,
+                        channel,
                         [2, 2],
                         [2, 2],
                         name='conv_4',
@@ -90,18 +80,18 @@ def construct_vae(original_dim, hidden_depth=3):
                 name='logistic_loc_variables',
                 shape=[FLAGS.categorical_dims],
             )
-            scale = tf.nn.softplus(tf.get_variable(
-                name='logistic_scale_variables',
-                shape=[FLAGS.categorical_dims],
-            ))
+            scale = tf.nn.softplus(
+                tf.get_variable(
+                    name='logistic_scale_variables',
+                    shape=[FLAGS.categorical_dims],
+                )
+            )
             scope['categorical'] = categorical
             scope['loc'] = loc
             scope['scale'] = scale
 
             return tfd.MixtureSameFamily(
-                mixture_distribution=tfd.Categorical(
-                    probs=categorical
-                ),
+                mixture_distribution=tfd.Categorical(probs=categorical),
                 components_distribution=tfd.Normal(
                     loc=loc,
                     scale=scale,
@@ -112,10 +102,9 @@ def construct_vae(original_dim, hidden_depth=3):
         with summary.SummaryScope('P-probability') as scope:
             scope['input'] = code
             logit = scope.sequential(
-                code,
-                [
+                code, [
                     tf.layers.Conv2DTranspose(
-                        128,
+                        channel,
                         [2, 2],
                         [2, 2],
                         name='deconv_2',
@@ -123,12 +112,10 @@ def construct_vae(original_dim, hidden_depth=3):
                     ),
                     tf.keras.layers.Activation('relu', name='relu_2'),
                     layers.ResidualBlock(
-                        128,
-                        kernel=[3, 3],
-                        activation=tf.nn.relu
+                        channel, kernel=[3, 3], activation=tf.nn.relu
                     ),
                     tf.layers.Conv2DTranspose(
-                        128,
+                        channel,
                         [2, 2],
                         [2, 2],
                         name='deconv_3',
@@ -136,12 +123,10 @@ def construct_vae(original_dim, hidden_depth=3):
                     ),
                     tf.keras.layers.Activation('relu', name='relu_3'),
                     layers.ResidualBlock(
-                        128,
-                        kernel=[3, 3],
-                        activation=tf.nn.relu
+                        channel, kernel=[3, 3], activation=tf.nn.relu
                     ),
                     tf.layers.Conv2DTranspose(
-                        128,
+                        channel,
                         [2, 2],
                         [2, 2],
                         name='deconv_4',
@@ -149,12 +134,10 @@ def construct_vae(original_dim, hidden_depth=3):
                     ),
                     tf.keras.layers.Activation('relu', name='relu_4'),
                     layers.ResidualBlock(
-                        128,
-                        kernel=[3, 3],
-                        activation=tf.nn.relu
+                        channel, kernel=[3, 3], activation=tf.nn.relu
                     ),
                     tf.layers.Conv2DTranspose(
-                        128,
+                        channel,
                         [2, 2],
                         [2, 2],
                         name='deconv_5',
@@ -173,17 +156,22 @@ def construct_vae(original_dim, hidden_depth=3):
 
         return tf.nn.relu(logit)
 
-    @tf.custom_gradient
     def quantize(latent):
-        expand = latent * 128.0
-        expand = tf.clip_by_value(expand, -128, 128)
-        expand = tf.round(expand)
-        expand /= 128.0
 
-        def grad(dy):
-            return dy * (1 - tf.cos(128.0 * np.pi * latent))
+        @tf.custom_gradient
+        def quantizer(latent):
+            expand = latent * 128.0
+            expand = tf.clip_by_value(expand, -128, 128)
+            expand = tf.round(expand)
+            expand /= 128.0
 
-        return expand, grad
+            def grad(dy):
+                return dy * (1 - tf.cos(128.0 * np.pi * latent))
+
+            return expand, grad
+
+        with tf.name_scope('quantizer'):
+            return quantizer(latent)
 
     data = tf.placeholder(tf.float32, [None, *original_dim])
 
@@ -196,7 +184,7 @@ def construct_vae(original_dim, hidden_depth=3):
     distribution = make_latent_distribution()
 
     # Define the model.
-    latent = make_encoder(data)  # (batch, z_dims, hidden_depth)
+    latent = make_encoder(data)    # (batch, z_dims, hidden_depth)
     latent = quantize(latent)
 
     stopped_latents = tf.stop_gradient(latent)
@@ -218,24 +206,24 @@ def construct_vae(original_dim, hidden_depth=3):
 
     # Define the loss.
     with summary.SummaryScope('losses') as scope:
-        train_bpp = tf.reduce_mean(tf.reduce_sum(
-            tf.log(likelihoods), axis=[1, 2])
+        train_bpp = tf.reduce_mean(
+            tf.reduce_sum(tf.log(likelihoods), axis=[1, 2])
         )
         train_bpp /= -np.log(2) * num_pixels
         train_mse = tf.reduce_mean(tf.squared_difference(data, x_tilde))
-        train_mse *= 255 ** 2 / num_pixels
+        train_mse *= 255**2 / num_pixels
         train_loss = train_mse * 0.1 + train_bpp
         scope['bpp'] = train_bpp
         scope['mse'] = train_mse
         scope['loss'] = train_loss
 
-    main_step = tf.train.AdamOptimizer(
-        FLAGS.learning_rate).minimize(train_loss)
+    main_step = tf.train.AdamOptimizer(FLAGS.learning_rate) \
+        .minimize(train_loss)
 
     random_sub_batch_dims = tf.random_uniform(
         [10],
         minval=0,
-        maxval=tf.shape(data,  out_type=tf.int32)[0],
+        maxval=tf.shape(data, out_type=tf.int32)[0],
         dtype=tf.int32,
     )
 
@@ -248,9 +236,7 @@ def construct_vae(original_dim, hidden_depth=3):
 
     image_comparison = tf.concat([data_random_sub_batch, generated], 2)
     comparison_summary = tf.summary.image(
-        'comparison',
-        image_comparison,
-        max_outputs=10
+        'comparison', image_comparison, max_outputs=10
     )
 
     # aux_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
@@ -276,7 +262,8 @@ def main():
     print('--------------')
 
     (x_input, elbo, code, optimize, merged, images) = construct_vae(
-        DIM
+        original_dim=DIM,
+        channel=64,
     )
 
     print('---------------')
@@ -298,22 +285,21 @@ def main():
         sess = tf.Session(FLAGS.tpu_address)
 
     if os.path.exists(FLAGS.summaries_dir):
-        subprocess.Popen(
-            f'rm -r {FLAGS.summaries_dir}/{FLAGS.test_dir}_{FLAGS.run_type}',
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE
-        ).communicate()
-        subprocess.Popen(
-            f'rm -r {FLAGS.summaries_dir}/{FLAGS.train_dir}_{FLAGS.run_type}',
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE
-        ).communicate()
+        rm_commands = [[
+            'rm', '-rf', f'{FLAGS.summaries_dir}/{dir}_{FLAGS.run_type}'
+        ] for dir in [FLAGS.train_dir, FLAGS.test_dir]]
+
+        for rm_command in rm_commands:
+            print(f'running: {rm_command}')
+            subprocess.Popen(
+                rm_command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stdin=subprocess.PIPE
+            ).communicate()
 
     train_writer = tf.summary.FileWriter(
-        f'{FLAGS.summaries_dir}/{FLAGS.train_dir}_{FLAGS.run_type}',
-        sess.graph
+        f'{FLAGS.summaries_dir}/{FLAGS.train_dir}_{FLAGS.run_type}', sess.graph
     )
     test_writer = tf.summary.FileWriter(
         f'{FLAGS.summaries_dir}/{FLAGS.test_dir}_{FLAGS.run_type}',
@@ -341,15 +327,13 @@ def main():
         for epoch in range(FLAGS.epochs):
             feed = {
                 x_input:
-                test[np.random.choice(
-                    test.shape[0], 100, replace=False), ...]
-                .reshape([-1, *DIM])
+                test[np.random.choice(test.shape[0], 100, replace=False), ...].
+                reshape([-1, *DIM])
             }
 
-            test_elbo, summary, images_summary = sess.run(
-                [elbo, merged, images],
-                feed
-            )
+            test_elbo, summary, images_summary = sess.run([
+                elbo, merged, images
+            ], feed)
             test_writer.add_summary(summary, FLAGS.train_steps * epoch)
             test_writer.add_summary(images_summary, FLAGS.train_steps * epoch)
             print(f'Epoch {epoch} elbo: {test_elbo}')
@@ -357,25 +341,23 @@ def main():
             # training step
             for train_step in range(FLAGS.train_steps):
                 feed = {
-                    x_input: train
-                    [np.random.choice(
-                        train.shape[0], FLAGS.batch_size, replace=False), ...]
-                    .reshape([-1, *DIM])
+                    x_input:
+                    train[np.random.choice(
+                        train.shape[0], FLAGS.batch_size, replace=False
+                    ), ...].reshape([-1, *DIM])
                 }
 
                 global_step = FLAGS.train_steps * epoch + train_step
                 if global_step == 0:
                     run_options = tf.RunOptions(
-                        trace_level=tf.RunOptions.FULL_TRACE)
-                    run_metadata = tf.RunMetadata()
-                    _, summary = sess.run(
-                        [optimize, merged],
-                        feed,
-                        options=run_options,
-                        run_metadata=run_metadata
+                        trace_level=tf.RunOptions.FULL_TRACE
                     )
-                    train_writer.add_summary(
-                        summary, global_step)
+                    run_metadata = tf.RunMetadata()
+                    _, summary = sess.run([optimize, merged],
+                                          feed,
+                                          options=run_options,
+                                          run_metadata=run_metadata)
+                    train_writer.add_summary(summary, global_step)
                     train_writer.add_run_metadata(
                         run_metadata,
                         f'step {global_step}',

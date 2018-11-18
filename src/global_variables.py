@@ -7,7 +7,6 @@ import types
 import tensorflow as tf
 import pprint
 
-
 WIDTH = 32
 HEIGHT = WIDTH
 CHANNEL = 3
@@ -55,51 +54,58 @@ def run_subprocesses():
             shell=True,
             stdout=subprocess.PIPE,
             stdin=subprocess.PIPE
-        ) .communicate()
+        ).communicate()
 
         subprocess.Popen(
             "kill $(ps -A | grep lt | grep -o '^[0-9]\\+')",
             shell=True,
             stdout=subprocess.PIPE,
             stdin=subprocess.PIPE
-        ) .communicate()
+        ).communicate()
 
         subprocess.Popen(
             f"rm '{URL_LOG}'",
             shell=True,
         )
 
-        print(subprocess.Popen(
-            f"npm install -g localtunnel; lt --port {FLAGS.tensorboard_port} -s {FLAGS.tunnel_loc} > {URL_LOG} 2>&1 &",
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE
-        ).communicate()[0].decode('ascii'))
+        print(
+            subprocess.Popen(
+                f"npm install -g localtunnel; \
+                        lt --port {FLAGS.tensorboard_port} -s \
+                        {FLAGS.tunnel_loc} > {URL_LOG} 2>&1 &",
+                shell=True,
+                stdout=subprocess.PIPE,
+                stdin=subprocess.PIPE
+            ).communicate()[0].decode('ascii')
+        )
 
         subprocess.Popen(
-            f"tensorboard --logdir '{FLAGS.summaries_dir}' --port {FLAGS.tensorboard_port} --host 0.0.0.0 >> tensorboard.log 2>&1 &",
+            f"tensorboard \
+                    --logdir '{FLAGS.summaries_dir}' \
+                    --port {FLAGS.tensorboard_port} \
+                    --host 0.0.0.0 >> tensorboard.log 2>&1 &",
             shell=True,
         )
 
 
 def define_flags(additional_flags=None):
-    reset = False  # @param {type: "boolean"}
+    reset = False    # @param {type: "boolean"}
     if (not reset) and FLAGS.is_set:
         return
 
     FLAGS.categorical_dims = 5
-    FLAGS.batch_size = 16  # @param {type: "number"}
-    FLAGS.epochs = 1000  # @param {type: "number"}
+    FLAGS.batch_size = 16    # @param {type: "number"}
+    FLAGS.epochs = 1000    # @param {type: "number"}
     FLAGS.is_set = True
-    FLAGS.learning_rate = 1e-3  # @param {type: "number"}
-    FLAGS.summary_frequency = 200  # @param {type: "number"}
-    FLAGS.train_steps = 600  # @param {type: "number"}
-    FLAGS.z_dims = 128  # @param {type: "number"}
+    FLAGS.learning_rate = 1e-3    # @param {type: "number"}
+    FLAGS.summary_frequency = 200    # @param {type: "number"}
+    FLAGS.train_steps = 600    # @param {type: "number"}
+    FLAGS.z_dims = 128    # @param {type: "number"}
     FLAGS.summarize = True
     FLAGS.local = os.uname()[1] == 'XPS'
     FLAGS.disable_residual_block = True
-    FLAGS.tunnel_loc = 'yiblet'  # @param
-    FLAGS.tensorboard_port = 8080  # @param {type : "number"}
+    FLAGS.tunnel_loc = 'yiblet'    # @param
+    FLAGS.tensorboard_port = 8080    # @param {type : "number"}
     FLAGS.run_type = 'primary'
     FLAGS.test_dir = 'test'
     FLAGS.train_dir = 'train'
@@ -121,7 +127,7 @@ def define_flags(additional_flags=None):
         FLAGS.data = '/gdrive/My Drive/cifar10'
         FLAGS.debug = False
         FLAGS.directory = '/gdrive/My Drive/data_mnist'
-        summaries_dir = 'summaries'  # @param {type: "string"}
+        summaries_dir = 'summaries'    # @param {type: "string"}
         FLAGS.summaries_dir = f'/gdrive/My Drive/{summaries_dir}'
         FLAGS.tpu_address = None
 

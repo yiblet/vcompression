@@ -149,21 +149,32 @@ class EntropyBottleneck(base_layer.Layer):
         that can be accepted by the layer.
     """
 
-    def __init__(self, init_scale=10, filters=(3, 3, 3), tail_mass=1e-9,
-                 optimize_integer_offset=True, likelihood_bound=1e-9,
-                 range_coder_precision=16, data_format="channels_last", **kwargs):
+    def __init__(
+        self,
+        init_scale=10,
+        filters=(3, 3, 3),
+        tail_mass=1e-9,
+        optimize_integer_offset=True,
+        likelihood_bound=1e-9,
+        range_coder_precision=16,
+        data_format="channels_last",
+        **kwargs
+    ):
         super(EntropyBottleneck, self).__init__(**kwargs)
         self._init_scale = float(init_scale)
         self._filters = tuple(int(f) for f in filters)
         self._tail_mass = float(tail_mass)
         if not 0 < self.tail_mass < 1:
             raise ValueError(
-                "`tail_mass` must be between 0 and 1, got {}.".format(self.tail_mass))
+                "`tail_mass` must be between 0 and 1, got {}.".format(
+                    self.tail_mass
+                )
+            )
         self._optimize_integer_offset = bool(optimize_integer_offset)
         self._likelihood_bound = float(likelihood_bound)
         self._range_coder_precision = int(range_coder_precision)
         self._data_format = data_format
-        self._channel_axis(2)  # trigger ValueError early
+        self._channel_axis(2)    # trigger ValueError early
         self.input_spec = base_layer.InputSpec(min_ndim=2)
 
     @property
@@ -196,10 +207,16 @@ class EntropyBottleneck(base_layer.Layer):
 
     def _channel_axis(self, ndim):
         try:
-            return {"channels_first": 1, "channels_last": ndim - 1}[self.data_format]
+            return {
+                "channels_first": 1,
+                "channels_last": ndim - 1
+            }[self.data_format]
         except KeyError:
-            raise ValueError("Unsupported `data_format` for {} layer: {}.".format(
-                self.__class__.__name__, self.data_format))
+            raise ValueError(
+                "Unsupported `data_format` for {} layer: {}.".format(
+                    self.__class__.__name__, self.data_format
+                )
+            )
 
     def _logits_cumulative(self, inputs, stop_gradient):
         """Evaluate logits of the cumulative densities.
@@ -259,11 +276,13 @@ class EntropyBottleneck(base_layer.Layer):
         channels = input_shape[channel_axis].value
         if channels is None:
             raise ValueError(
-                "The channel dimension of the inputs must be defined.")
+                "The channel dimension of the inputs must be defined."
+            )
         self.input_spec = base_layer.InputSpec(
-            ndim=input_shape.ndims, axes={channel_axis: channels})
+            ndim=input_shape.ndims, axes={channel_axis: channels}
+        )
         filters = (1,) + self.filters + (1,)
-        scale = self.init_scale ** (1 / (len(self.filters) + 1))
+        scale = self.init_scale**(1 / (len(self.filters) + 1))
 
         # Create variables.
         self._matrices = []
@@ -272,23 +291,29 @@ class EntropyBottleneck(base_layer.Layer):
         for i in range(len(self.filters) + 1):
             init = np.log(np.expm1(1 / scale / filters[i + 1]))
             matrix = self.add_variable(
-                "matrix_{}".format(i), dtype=self.dtype,
+                "matrix_{}".format(i),
+                dtype=self.dtype,
                 shape=(channels, filters[i + 1], filters[i]),
-                initializer=init_ops.Constant(init))
+                initializer=init_ops.Constant(init)
+            )
             matrix = nn.softplus(matrix)
             self._matrices.append(matrix)
 
             bias = self.add_variable(
-                "bias_{}".format(i), dtype=self.dtype,
+                "bias_{}".format(i),
+                dtype=self.dtype,
                 shape=(channels, filters[i + 1], 1),
-                initializer=init_ops.RandomUniform(-.5, .5))
+                initializer=init_ops.RandomUniform(-.5, .5)
+            )
             self._biases.append(bias)
 
             if i < len(self.filters):
                 factor = self.add_variable(
-                    "factor_{}".format(i), dtype=self.dtype,
+                    "factor_{}".format(i),
+                    dtype=self.dtype,
                     shape=(channels, filters[i + 1], 1),
-                    initializer=init_ops.Zeros())
+                    initializer=init_ops.Zeros()
+                )
                 factor = math_ops.tanh(factor)
                 self._factors.append(factor)
 
@@ -308,15 +333,20 @@ class EntropyBottleneck(base_layer.Layer):
         target = constant_op.constant([-target, 0, target], dtype=self.dtype)
 
         def quantiles_initializer(shape, dtype=None, partition_info=None):
-            del partition_info  # unused
+            del partition_info    # unused
             assert tuple(shape[1:]) == (1, 3)
-            init = constant_op.constant(
-                [[[-self.init_scale, 0, self.init_scale]]], dtype=dtype)
+            init = constant_op.constant([[[
+                -self.init_scale, 0, self.init_scale
+            ]]],
+                                        dtype=dtype)
             return array_ops.tile(init, (shape[0], 1, 1))
 
         quantiles = self.add_variable(
-            "quantiles", shape=(channels, 1, 3), dtype=self.dtype,
-            initializer=quantiles_initializer)
+            "quantiles",
+            shape=(channels, 1, 3),
+            dtype=self.dtype,
+            initializer=quantiles_initializer
+        )
         logits = self._logits_cumulative(quantiles, stop_gradient=True)
         loss = math_ops.reduce_sum(abs(logits - target))
         self.add_loss(loss, inputs=None)
@@ -346,36 +376,48 @@ class EntropyBottleneck(base_layer.Layer):
         upper = self._logits_cumulative(samples + half, stop_gradient=True)
         # Flip signs if we can move more towards the left tail of the sigmoid.
         sign = -math_ops.sign(math_ops.add_n([lower, upper]))
-        pmf = abs(math_ops.sigmoid(sign * upper) -
-                  math_ops.sigmoid(sign * lower))
+        pmf = abs(
+            math_ops.sigmoid(sign * upper) - math_ops.sigmoid(sign * lower)
+        )
         # Add tail masses to first and last bin of pmf, as we clip values for
         # compression, meaning that out-of-range values get mapped to these bins.
         pmf = array_ops.concat([
-            math_ops.add_n([pmf[:, 0, :1], math_ops.sigmoid(lower[:, 0, :1])]),
+            math_ops.add_n([pmf[:, 0, :1],
+                            math_ops.sigmoid(lower[:, 0, :1])]),
             pmf[:, 0, 1:-1],
-            math_ops.add_n(
-                [pmf[:, 0, -1:], math_ops.sigmoid(-upper[:, 0, -1:])]),
-        ], axis=-1)
+            math_ops.add_n([
+                pmf[:, 0, -1:],
+                math_ops.sigmoid(-upper[:, 0, -1:])
+            ]),
+        ],
+                               axis=-1)
         self._pmf = pmf
 
         cdf = coder_ops.pmf_to_quantized_cdf(
-            pmf, precision=self.range_coder_precision)
+            pmf, precision=self.range_coder_precision
+        )
 
         # We need to supply an initializer without fully defined static shape here,
         # or the variable will return the wrong dynamic shape later. A placeholder
         # with default gets the trick done.
         def cdf_init(*args, **kwargs):
-            del args, kwargs  # unused
+            del args, kwargs    # unused
             return array_ops.placeholder_with_default(
                 array_ops.zeros((channels, 1), dtype=dtypes.int32),
-                shape=(channels, None))
+                shape=(channels, None)
+            )
 
         self._quantized_cdf = self.add_variable(
-            "quantized_cdf", shape=None, initializer=cdf_init, dtype=dtypes.int32,
-            trainable=False)
+            "quantized_cdf",
+            shape=None,
+            initializer=cdf_init,
+            dtype=dtypes.int32,
+            trainable=False
+        )
 
         update_op = state_ops.assign(
-            self._quantized_cdf, cdf, validate_shape=False)
+            self._quantized_cdf, cdf, validate_shape=False
+        )
         self.add_update(update_op, inputs=None)
 
         super(EntropyBottleneck, self).build(input_shape)
@@ -419,7 +461,8 @@ class EntropyBottleneck(base_layer.Layer):
         # Add noise or quantize.
         if training:
             noise = random_ops.random_uniform(
-                array_ops.shape(values), -half, half)
+                array_ops.shape(values), -half, half
+            )
             values = math_ops.add_n([values, noise])
         elif self.optimize_integer_offset:
             values = math_ops.round(values - self._medians) + self._medians
@@ -437,10 +480,12 @@ class EntropyBottleneck(base_layer.Layer):
         sign = -math_ops.sign(math_ops.add_n([lower, upper]))
         sign = array_ops.stop_gradient(sign)
         likelihood = abs(
-            math_ops.sigmoid(sign * upper) - math_ops.sigmoid(sign * lower))
+            math_ops.sigmoid(sign * upper) - math_ops.sigmoid(sign * lower)
+        )
         if self.likelihood_bound > 0:
             likelihood_bound = constant_op.constant(
-                self.likelihood_bound, dtype=self.dtype)
+                self.likelihood_bound, dtype=self.dtype
+            )
             likelihood = tfc_math_ops.lower_bound(likelihood, likelihood_bound)
 
         # Convert back to input tensor shape.
@@ -453,7 +498,8 @@ class EntropyBottleneck(base_layer.Layer):
 
         if not context.executing_eagerly():
             values_shape, likelihood_shape = self.compute_output_shape(
-                inputs.shape)
+                inputs.shape
+            )
             values.set_shape(values_shape)
             likelihood.set_shape(likelihood_shape)
 
@@ -497,8 +543,8 @@ class EntropyBottleneck(base_layer.Layer):
             # Bring inputs to the right range by centering the range on the medians.
             half = constant_op.constant(.5, dtype=self.dtype)
             medians = array_ops.squeeze(self._medians, [1, 2])
-            offsets = (math_ops.cast(num_levels // 2,
-                                     self.dtype) + half) - medians
+            offsets = (math_ops.cast(num_levels // 2, self.dtype) +
+                       half) - medians
             # Expand offsets to input dimensions and add to inputs.
             values = inputs + offsets[slices[:-1]]
 
@@ -506,14 +552,19 @@ class EntropyBottleneck(base_layer.Layer):
             # all values are positive, the cast effectively implements rounding.
             values = math_ops.maximum(values, half)
             values = math_ops.minimum(
-                values, math_ops.cast(num_levels, self.dtype) - half)
+                values,
+                math_ops.cast(num_levels, self.dtype) - half
+            )
             values = math_ops.cast(values, dtypes.int16)
 
             def loop_body(tensor):
                 return coder_ops.range_encode(
-                    tensor, cdf, precision=self.range_coder_precision)
+                    tensor, cdf, precision=self.range_coder_precision
+                )
+
             strings = functional_ops.map_fn(
-                loop_body, values, dtype=dtypes.string, back_prop=False)
+                loop_body, values, dtype=dtypes.string, back_prop=False
+            )
 
             if not context.executing_eagerly():
                 strings.set_shape(inputs.shape[:1])
@@ -548,9 +599,12 @@ class EntropyBottleneck(base_layer.Layer):
                 if channels is None:
                     channels = self.input_spec.axes[channel_axis]
             else:
-                if not (shape.shape.is_fully_defined() and shape.shape.ndims == 1):
+                if not (
+                    shape.shape.is_fully_defined() and shape.shape.ndims == 1
+                ):
                     raise ValueError(
-                        "`shape` must be a vector with known length.")
+                        "`shape` must be a vector with known length."
+                    )
                 ndim = shape.shape[0].value + 1
                 channel_axis = self._channel_axis(ndim)
                 input_shape = ndim * [None]
@@ -569,9 +623,12 @@ class EntropyBottleneck(base_layer.Layer):
 
             def loop_body(string):
                 return coder_ops.range_decode(
-                    string, shape, cdf, precision=self.range_coder_precision)
+                    string, shape, cdf, precision=self.range_coder_precision
+                )
+
             outputs = functional_ops.map_fn(
-                loop_body, strings, dtype=dtypes.int16, back_prop=False)
+                loop_body, strings, dtype=dtypes.int16, back_prop=False
+            )
             outputs = math_ops.cast(outputs, self.dtype)
 
             medians = array_ops.squeeze(self._medians, [1, 2])
