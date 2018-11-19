@@ -139,4 +139,6 @@ def define_flags(additional_flags=None):
     if additional_flags is not None:
         FLAGS.bulk_update(additional_flags)
 
+    FLAGS.use_tpu = FLAGS.tpu_address is not None
+
     run_subprocesses()

@@ -14,4 +14,9 @@ def define_additional_flags():
 def test_build(capsys):
     with capsys.disabled():
         define_additional_flags()
-        main.main()
+        main.model_fn(
+            tf.placeholder(tf.float32, [None, *DIM]),
+            tf.placeholder(tf.float32, [None, *DIM]),
+            tf.estimator.ModeKeys.EVAL,
+            params=main.construct_params(channel=64),
+        )

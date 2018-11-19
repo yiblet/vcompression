@@ -17,6 +17,7 @@ import layers
 import retrieval
 
 tf.reset_default_graph()
+tf.logging.set_verbosity(tf.logging.ERROR)
 
 
 def make_latent_distribution_layer():
@@ -68,9 +69,36 @@ def log_sampling_information(latent, distribution):
         )
 
 
-def construct_vae(original_dim, channel):
+def log_image_information(features, latent, channel, make_decoder):
+    with tf.name_scope('sampling'):
+        random_sub_batch_dims = tf.random_uniform(
+            [10],
+            minval=0,
+            maxval=tf.shape(features, out_type=tf.int32)[0],
+            dtype=tf.int32,
+        )
 
-    data = tf.placeholder(tf.float32, [None, *original_dim])
+        latent_random_sub_batch = tf.gather(latent, random_sub_batch_dims)
+        data_random_sub_batch = tf.gather(features, random_sub_batch_dims)
+
+        generated = make_decoder(latent_random_sub_batch, channel)
+
+        image_comparison = tf.concat([data_random_sub_batch, generated], 2)
+    return tf.summary.image('comparison', image_comparison, max_outputs=10)
+
+
+def create_estimator_spec(**kwargs):
+    if not FLAGS.use_tpu:
+        return tf.estimator.EstimatorSpec(**kwargs)
+    else:
+        return tf.contrib.tpu.TPUEstimatorSpec(**kwargs)
+
+
+def model_fn(features, labels, mode, params):
+    original_dim = features.get_shape().as_list()[1:]
+    channel = params['channel']
+    train_summary_dir = params['train_summary_dir']
+    test_summary_dir = params['test_summary_dir']
 
     make_encoder = tf.make_template('encoder', make_encoder_layer)
     make_decoder = tf.make_template('decoder', make_decoder_layer)
@@ -82,7 +110,7 @@ def construct_vae(original_dim, channel):
 
     # Define the model.
     latent = make_encoder(
-        data, channel, original_dim
+        features, channel, original_dim
     )    # (batch, z_dims, hidden_depth)
     latent = layers.Quantizer()(latent)
     x_tilde = make_decoder(latent, channel)
@@ -96,13 +124,13 @@ def construct_vae(original_dim, channel):
     )
 
     log_sampling_information(stopped_latents, distribution)
-    with summary.SummaryScope('losses') as scope:
 
+    with summary.SummaryScope('losses') as scope:
         bpp_flattened = tf.layers.flatten(tf.log(likelihoods))
         train_bpp = tf.reduce_mean(tf.reduce_sum(bpp_flattened, axis=[1]))
 
         train_bpp /= -np.log(2) * num_pixels
-        train_mse = tf.reduce_mean(tf.squared_difference(data, x_tilde))
+        train_mse = tf.reduce_mean(tf.squared_difference(features, x_tilde))
         train_mse *= 255**2 / num_pixels
         train_loss = train_mse * 0.05 + train_bpp
         scope['likelihoods'] = likelihoods
@@ -110,93 +138,134 @@ def construct_vae(original_dim, channel):
         scope['mse'] = train_mse
         scope['loss'] = train_loss
 
-    main_step = tf.train.AdamOptimizer(FLAGS.learning_rate) \
-        .minimize(train_loss)
+    predictions = x_tilde
+    loss = train_loss
+    optimizer = tf.train.AdamOptimizer(FLAGS.learning_rate)
+    if FLAGS.use_tpu:
+        optimizer = tf.contrib.tpu.CrossShardOptimizer(optimizer)
 
-    random_sub_batch_dims = tf.random_uniform(
-        [10],
-        minval=0,
-        maxval=tf.shape(data, out_type=tf.int32)[0],
-        dtype=tf.int32,
+    train_op = optimizer.minimize(train_loss)
+
+    if tf.estimator.ModeKeys.EVAL:
+        log_image_information(features, latent, channel, make_decoder)
+
+    return create_estimator_spec(
+        mode=mode,
+        predictions=predictions,
+        loss=loss,
+        train_op=train_op,
+        evaluation_hooks=[
+            util.MetadataHook(save_steps=10, output_dir=test_summary_dir),
+            tf.train.SummarySaverHook(
+                save_steps=1,
+                output_dir=test_summary_dir,
+                summary_op=tf.summary.merge_all(),
+            )
+        ]
     )
 
-    latent_random_sub_batch = tf.gather(latent, random_sub_batch_dims)
-    data_random_sub_batch = tf.gather(data, random_sub_batch_dims)
 
-    generated = make_decoder(latent_random_sub_batch, channel)
-
-    merged = tf.summary.merge_all()
-
-    image_comparison = tf.concat([data_random_sub_batch, generated], 2)
-    comparison_summary = tf.summary.image(
-        'comparison', image_comparison, max_outputs=10
-    )
-
-    train_op = tf.group(main_step)
-
-    images_summary = tf.summary.merge([comparison_summary])
-
-    return (data, train_loss, latent, train_op, merged, images_summary)
-
-
-def gdn(input):
-    return tf.contrib.layers.gdn(input)
-
-
-def inverse_gdn(input):
-    return tf.contrib.layers.gdn(input, inverse=True)
-
-
-def main():
-    print('-----FLAGS----')
-    pprint.pprint(FLAGS.__dict__)
-    print('--------------')
-
-    (x_input, elbo, code, optimize, merged, images) = construct_vae(
-        original_dim=DIM,
-        channel=64,
-    )
-
-    print('---------------')
-    util.print_param_count()
-    print('---------------')
-    util.print_param_count('encoder')
-    print('---------------')
-    util.print_param_count('decoder')
-    print('---------------')
-
-    if FLAGS.debug:
-        return
-
+def gen_input_fns():
     train, test = retrieval.load_data()
 
-    if FLAGS.tpu_address is None:
-        sess = tf.Session()
-    else:
-        sess = tf.Session(FLAGS.tpu_address)
+    return (
+        tf.estimator.inputs.numpy_input_fn(
+            train,
+            train,
+            batch_size=FLAGS.batch_size,
+            shuffle=True,
+        ),
+        tf.estimator.inputs.numpy_input_fn(
+            test,
+            test,
+            batch_size=FLAGS.batch_size,
+            shuffle=True,
+        ),
+    )
 
+
+def clean_logdir():
     if os.path.exists(FLAGS.summaries_dir):
         files_to_remove = [
             f'{FLAGS.summaries_dir}/{dir}_{FLAGS.run_type}'
-            for dir in [FLAGS.train_dir, FLAGS.test_dir]
+            for dir in [FLAGS.test_dir, FLAGS.train_dir]
         ]
 
         for file_to_remove in files_to_remove:
             print(f'removing: {file_to_remove}')
-            shutil.rmtree(file_to_remove)
+            if os.path.isdir(file_to_remove):
+                shutil.rmtree(file_to_remove)
 
-    train_writer = tf.summary.FileWriter(
-        f'{FLAGS.summaries_dir}/{FLAGS.train_dir}_{FLAGS.run_type}', sess.graph
-    )
-    test_writer = tf.summary.FileWriter(
+
+def construct_params(channel=64):
+    return {
+        'channel':
+        64,
+        'train_summary_dir':
+        f'{FLAGS.summaries_dir}/{FLAGS.train_dir}_{FLAGS.run_type}',
+        'test_summary_dir':
         f'{FLAGS.summaries_dir}/{FLAGS.test_dir}_{FLAGS.run_type}',
-    )
-    print(f"logging at {FLAGS.summaries_dir}")
+    }
+
+
+def construct_estimator(params):
+    params = construct_params(channel=64)
+    train_summary_dir = params['train_summary_dir']
+    test_summary_dir = params['test_summary_dir']
+    if not FLAGS.use_tpu:
+        print('NOT using tpu')
+        config = tf.estimator.RunConfig(
+            model_dir=train_summary_dir,
+            save_summary_steps=200,
+        )
+        estimator = tf.estimator.Estimator(
+            model_fn, params=params, config=config
+        )
+
+    else:
+        print('using tpu')
+        tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
+            FLAGS.tpu_address
+        )
+        tpu_config = tf.contrib.tpu.TPUConfig()
+
+        config = tf.contrib.tpu.RunConfig(
+            cluster=tpu_cluster_resolver,
+            model_dir=train_summary_dir,
+            save_summary_steps=200,
+            tpu_config=tpu_config,
+        )
+
+        estimator = tf.contrib.tpu.TPUEstimator(
+            model_fn,
+            params=params,
+            config=config,
+            train_batch_size=FLAGS.batch_size,
+            eval_batch_size=FLAGS.batch_size,
+        )
+    return estimator
+
+
+def main():
+    if not FLAGS.use_tpu:
+        sess = tf.Session()
+    else:
+        sess = tf.Session(FLAGS.tpu_address)
+
+    clean_logdir()
+
+    params = construct_params(channel=64)
+    train_input_fn, eval_input_fn = gen_input_fns()
+
+    train_summary_dir = params['train_summary_dir']
+    test_summary_dir = params['test_summary_dir']
+
+    estimator = construct_estimator(params)
 
     try:
         sess.run(tf.global_variables_initializer())
 
-        if FLAGS.tpu_address is not None:
+        if FLAGS.use_tpu:
             print('Initializing TPUs...')
             sess.run(tf.contrib.tpu.initialize_system())
 
@@ -211,50 +280,12 @@ def main():
         if not os.path.exists(FLAGS.directory):
             os.mkdir(FLAGS.directory)
 
+        test_writer = tf.summary.FileWriter(test_summary_dir)
+
         for epoch in range(FLAGS.epochs):
-            feed = {
-                x_input:
-                test[np.random.choice(test.shape[0], 100, replace=False), ...].
-                reshape([-1, *DIM])
-            }
-
-            test_elbo, summary, images_summary = sess.run([
-                elbo, merged, images
-            ], feed)
-            test_writer.add_summary(summary, FLAGS.train_steps * epoch)
-            test_writer.add_summary(images_summary, FLAGS.train_steps * epoch)
-            print(f'Epoch {epoch} elbo: {test_elbo}')
-
-            # training step
-            for train_step in range(FLAGS.train_steps):
-                feed = {
-                    x_input:
-                    train[np.random.choice(
-                        train.shape[0], FLAGS.batch_size, replace=False
-                    ), ...].reshape([-1, *DIM])
-                }
-
-                global_step = FLAGS.train_steps * epoch + train_step
-                if global_step == 0:
-                    run_options = tf.RunOptions(
-                        trace_level=tf.RunOptions.FULL_TRACE
-                    )
-                    run_metadata = tf.RunMetadata()
-                    _, summary = sess.run([optimize, merged],
-                                          feed,
-                                          options=run_options,
-                                          run_metadata=run_metadata)
-                    train_writer.add_summary(summary, global_step)
-                    train_writer.add_run_metadata(
-                        run_metadata,
-                        f'step {global_step}',
-                        global_step=global_step
-                    )
-                elif train_step % FLAGS.summary_frequency == 0:
-                    _, summary = sess.run([optimize, merged], feed)
-                    train_writer.add_summary(summary, global_step)
-                else:
-                    sess.run([optimize], feed)
+            estimator.evaluate(eval_input_fn, steps=1)
+            estimator.train(train_input_fn, steps=FLAGS.train_steps)
+            print(f'epoch: {epoch}')
 
     finally:
         # For now, TPU sessions must be shutdown separately from

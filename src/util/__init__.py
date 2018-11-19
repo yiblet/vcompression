@@ -1,11 +1,11 @@
 from __future__ import absolute_import
+from util.metadatahook import MetadataHook
 import tensorflow as tf
 import numpy as np
 import types
 
+
 # --- plotting
-
-
 def plot_codes(ax, codes, labels):
     ax.scatter(codes[:, 0], codes[:, 1], s=2, c=labels, alpha=0.1)
     ax.set_aspect('equal')
