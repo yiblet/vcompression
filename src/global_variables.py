@@ -110,7 +110,9 @@ def define_flags(additional_flags=None):
     FLAGS.test_dir = 'test'
     FLAGS.train_dir = 'train'
 
-    if not hasattr(FLAGS, 'local'):
+    if hasattr(additional_flags, 'local'):
+        FLAGS.local = additional_flags.local
+    else:
         FLAGS.local = os.uname()[1] == 'XPS'
 
     if FLAGS.local:

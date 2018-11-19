@@ -23,10 +23,13 @@ def variable_summaries(key, var, collection=DEFAULT_SUMMARY_COLLECTION):
 
 class SummaryScope(dict):
 
-    def __init__(self, scope_name, collection=DEFAULT_SUMMARY_COLLECTION):
+    def __init__(
+        self, scope_name, silent=False, collection=DEFAULT_SUMMARY_COLLECTION
+    ):
         super()
         self.scope_name = scope_name
         self.collection = collection
+        self.silent = silent
 
     def _get_name(self, name):
         name = name[:name.rindex('/')]
@@ -63,5 +66,6 @@ class SummaryScope(dict):
                 print(f'{k}: {v.shape}')
             print('')
 
-        for (key, var) in self.items():
-            variable_summaries(key, var, self.collection)
+        if not self.silent:
+            for (key, var) in self.items():
+                variable_summaries(key, var, self.collection)

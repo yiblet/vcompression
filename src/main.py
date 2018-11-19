@@ -3,6 +3,7 @@ from __future__ import absolute_import
 import os
 import pprint
 import tensorflow as tf
+import tensorflow_probability as tfp
 import numpy as np
 import subprocess
 import sys
@@ -17,198 +18,83 @@ import retrieval
 tf.reset_default_graph()
 
 
-def construct_vae(original_dim, channel, hidden_depth=3):
-    import tensorflow_probability as tfp
+def make_latent_distribution_layer():
     tfd = tfp.distributions
-
-    def make_encoder(data):
-        with summary.SummaryScope('Q-probability') as scope:
-            x = tf.reshape(data, (-1, *original_dim))
-            scope['input'] = x
-            x = scope.sequential(
-                x,
-                [
-                    tf.layers.Conv2D(
-                        channel, [2, 2], [2, 2], name='conv_1', activation=None
-                    ),
-                    tf.keras.layers.Activation('relu', name='relu_1'),
-                    layers.ResidualBlock(
-                        channel, kernel=[3, 3], activation=tf.nn.relu
-                    ),
-                    tf.layers.Conv2D(
-                        channel,
-                        [2, 2],
-                        [2, 2],
-                        name='conv_2',
-                        activation=None,
-                    ),
-                    tf.keras.layers.Activation('relu', name='relu_2'),
-                    layers.ResidualBlock(
-                        channel, kernel=[3, 3], activation=tf.nn.relu
-                    ),
-                    tf.layers.Conv2D(
-                        channel,
-                        [2, 2],
-                        [2, 2],
-                        name='conv_3',
-                        activation=None,
-                    ),
-                    tf.keras.layers.Activation('relu', name='relu_3'),
-                    layers.ResidualBlock(
-                        channel, kernel=[3, 3], activation=tf.nn.relu
-                    ),
-                    tf.layers.Conv2D(
-                        channel,
-                        [2, 2],
-                        [2, 2],
-                        name='conv_4',
-                        activation=tf.nn.sigmoid,
-                    ),
-                ],
-            )
-
-        return x
-
-    def make_latent_distribution():
-        with summary.SummaryScope('latent_distributions') as scope:
-            categorical = tf.get_variable(
-                name='categorical_distribution',
+    with summary.SummaryScope('latent_distributions') as scope:
+        categorical = tf.get_variable(
+            name='categorical_distribution',
+            shape=[FLAGS.categorical_dims],
+        )
+        categorical = tf.nn.softmax(categorical)
+        loc = tf.get_variable(
+            name='logistic_loc_variables',
+            shape=[FLAGS.categorical_dims],
+        )
+        scale = tf.nn.softplus(
+            tf.get_variable(
+                name='logistic_scale_variables',
                 shape=[FLAGS.categorical_dims],
             )
-            categorical = tf.nn.softmax(categorical)
-            loc = tf.get_variable(
-                name='logistic_loc_variables',
-                shape=[FLAGS.categorical_dims],
+        )
+        scope['categorical'] = categorical
+        scope['loc'] = loc
+        scope['scale'] = scale
+
+        return tfd.MixtureSameFamily(
+            mixture_distribution=tfd.Categorical(probs=categorical),
+            components_distribution=tfd.Normal(
+                loc=loc,
+                scale=scale,
             )
-            scale = tf.nn.softplus(
-                tf.get_variable(
-                    name='logistic_scale_variables',
-                    shape=[FLAGS.categorical_dims],
-                )
-            )
-            scope['categorical'] = categorical
-            scope['loc'] = loc
-            scope['scale'] = scale
+        )
 
-            return tfd.MixtureSameFamily(
-                mixture_distribution=tfd.Categorical(probs=categorical),
-                components_distribution=tfd.Normal(
-                    loc=loc,
-                    scale=scale,
-                )
-            )
 
-    def make_decoder(code):
-        with summary.SummaryScope('P-probability') as scope:
-            scope['input'] = code
-            logit = scope.sequential(
-                code, [
-                    tf.layers.Conv2DTranspose(
-                        channel,
-                        [2, 2],
-                        [2, 2],
-                        name='deconv_2',
-                        activation=None,
-                    ),
-                    tf.keras.layers.Activation('relu', name='relu_2'),
-                    layers.ResidualBlock(
-                        channel, kernel=[3, 3], activation=tf.nn.relu
-                    ),
-                    tf.layers.Conv2DTranspose(
-                        channel,
-                        [2, 2],
-                        [2, 2],
-                        name='deconv_3',
-                        activation=None,
-                    ),
-                    tf.keras.layers.Activation('relu', name='relu_3'),
-                    layers.ResidualBlock(
-                        channel, kernel=[3, 3], activation=tf.nn.relu
-                    ),
-                    tf.layers.Conv2DTranspose(
-                        channel,
-                        [2, 2],
-                        [2, 2],
-                        name='deconv_4',
-                        activation=None,
-                    ),
-                    tf.keras.layers.Activation('relu', name='relu_4'),
-                    layers.ResidualBlock(
-                        channel, kernel=[3, 3], activation=tf.nn.relu
-                    ),
-                    tf.layers.Conv2DTranspose(
-                        channel,
-                        [2, 2],
-                        [2, 2],
-                        name='deconv_5',
-                        activation=None,
-                    ),
-                    tf.keras.layers.Activation('relu', name='relu_5'),
-                    tf.layers.Conv2DTranspose(
-                        3,
-                        [1, 1],
-                        [1, 1],
-                        name='deconv_6',
-                        activation=None,
-                    ),
-                ]
-            )
+def make_encoder_layer(data, channel, original_dim):
+    data = tf.reshape(data, (-1, *original_dim))
+    return layers.Encoder(channel)(data)
 
-        return tf.nn.relu(logit)
 
-    def quantize(latent):
+def make_decoder_layer(code, channel):
+    return layers.Decoder(channel)(code)
 
-        @tf.custom_gradient
-        def quantizer(latent):
-            expand = latent * 128.0
-            expand = tf.clip_by_value(expand, -128, 128)
-            expand = tf.round(expand)
-            expand /= 128.0
 
-            def grad(dy):
-                return dy * (1 - tf.cos(128.0 * np.pi * latent))
-
-            return expand, grad
-
-        with tf.name_scope('quantizer'):
-            return quantizer(latent)
-
-    data = tf.placeholder(tf.float32, [None, *original_dim])
-
-    make_encoder = tf.make_template('encoder', make_encoder)
-    make_decoder = tf.make_template('decoder', make_decoder)
-    make_latent_distribution = tf.make_template(
-        'distribution', make_latent_distribution
-    )
-
-    distribution = make_latent_distribution()
-
-    # Define the model.
-    latent = make_encoder(data)    # (batch, z_dims, hidden_depth)
-    latent = quantize(latent)
-
-    stopped_latents = tf.stop_gradient(latent)
-    likelihoods = distribution.prob(stopped_latents)
-
+def log_sampling_information(latent, distribution):
     with summary.SummaryScope('samples') as scope:
-        samples = tf.layers.flatten(stopped_latents)
+        samples = tf.layers.flatten(latent)
         scope['latent_samples'] = samples
         scope['distribution_samples'] = distribution.sample(
             samples.get_shape()[-1]
         )
 
-    # entropy_bottleneck = entropy.entropy_models.EntropyBottleneck()
-    # latent_tilde, likelihoods = entropy_bottleneck(latent, training=True)
 
-    x_tilde = make_decoder(latent)
+def construct_vae(original_dim, channel):
 
+    data = tf.placeholder(tf.float32, [None, *original_dim])
+
+    make_encoder = tf.make_template('encoder', make_encoder_layer)
+    make_decoder = tf.make_template('decoder', make_decoder_layer)
+    make_latent_distribution = tf.make_template(
+        'distribution', make_latent_distribution_layer
+    )
+
+    distribution = make_latent_distribution()
+
+    # Define the model.
+    latent = make_encoder(
+        data, channel, original_dim
+    )    # (batch, z_dims, hidden_depth)
+    latent = layers.Quantizer()(latent)
+    x_tilde = make_decoder(latent, channel)
     num_pixels = original_dim[0] * original_dim[1]
 
-    # Define the loss.
+    stopped_latents = tf.stop_gradient(latent)
+    likelihoods = distribution.prob(stopped_latents)
+    log_sampling_information(stopped_latents, distribution)
     with summary.SummaryScope('losses') as scope:
         train_bpp = tf.reduce_mean(
-            tf.reduce_sum(tf.log(likelihoods), axis=[1, 2])
+            tf.reduce_sum(tf.layers.flatten(tf.log(likelihoods)), axis=[1])
         )
+
         train_bpp /= -np.log(2) * num_pixels
         train_mse = tf.reduce_mean(tf.squared_difference(data, x_tilde))
         train_mse *= 255**2 / num_pixels
@@ -230,7 +116,7 @@ def construct_vae(original_dim, channel, hidden_depth=3):
     latent_random_sub_batch = tf.gather(latent, random_sub_batch_dims)
     data_random_sub_batch = tf.gather(data, random_sub_batch_dims)
 
-    generated = make_decoder(latent_random_sub_batch)
+    generated = make_decoder(latent_random_sub_batch, channel)
 
     merged = tf.summary.merge_all()
 
@@ -239,8 +125,6 @@ def construct_vae(original_dim, channel, hidden_depth=3):
         'comparison', image_comparison, max_outputs=10
     )
 
-    # aux_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
-    # aux_step = aux_optimizer.minimize(entropy_bottleneck.losses[0])
     train_op = tf.group(main_step)
 
     images_summary = tf.summary.merge([comparison_summary])
