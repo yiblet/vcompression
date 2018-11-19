@@ -1,6 +1,7 @@
 # @title The Big File { display-mode: "form" }
 from __future__ import absolute_import
 import os
+import shutil
 import pprint
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -51,7 +52,7 @@ def make_latent_distribution_layer():
 
 def make_encoder_layer(data, channel, original_dim):
     data = tf.reshape(data, (-1, *original_dim))
-    return layers.Encoder(channel)(data)
+    return layers.Encoder(channel, 32)(data)
 
 
 def make_decoder_layer(code, channel):
@@ -88,17 +89,23 @@ def construct_vae(original_dim, channel):
     num_pixels = original_dim[0] * original_dim[1]
 
     stopped_latents = tf.stop_gradient(latent)
-    likelihoods = distribution.prob(stopped_latents)
+    likelihoods = distribution.cdf(
+        tf.clip_by_value(stopped_latents + 0.5 / 255.0, 0.0, 1.0)
+    ) - distribution.cdf(
+        tf.clip_by_value(stopped_latents - 0.5 / 255.0, 0.0, 1.0)
+    )
+
     log_sampling_information(stopped_latents, distribution)
     with summary.SummaryScope('losses') as scope:
-        train_bpp = tf.reduce_mean(
-            tf.reduce_sum(tf.layers.flatten(tf.log(likelihoods)), axis=[1])
-        )
+
+        bpp_flattened = tf.layers.flatten(tf.log(likelihoods))
+        train_bpp = tf.reduce_mean(tf.reduce_sum(bpp_flattened, axis=[1]))
 
         train_bpp /= -np.log(2) * num_pixels
         train_mse = tf.reduce_mean(tf.squared_difference(data, x_tilde))
         train_mse *= 255**2 / num_pixels
-        train_loss = train_mse * 0.1 + train_bpp
+        train_loss = train_mse * 0.05 + train_bpp
+        scope['likelihoods'] = likelihoods
         scope['bpp'] = train_bpp
         scope['mse'] = train_mse
         scope['loss'] = train_loss
@@ -169,18 +176,14 @@ def main():
         sess = tf.Session(FLAGS.tpu_address)
 
     if os.path.exists(FLAGS.summaries_dir):
-        rm_commands = [[
-            'rm', '-rf', f'{FLAGS.summaries_dir}/{dir}_{FLAGS.run_type}'
-        ] for dir in [FLAGS.train_dir, FLAGS.test_dir]]
+        files_to_remove = [
+            f'{FLAGS.summaries_dir}/{dir}_{FLAGS.run_type}'
+            for dir in [FLAGS.train_dir, FLAGS.test_dir]
+        ]
 
-        for rm_command in rm_commands:
-            print(f'running: {rm_command}')
-            subprocess.Popen(
-                rm_command,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stdin=subprocess.PIPE
-            ).communicate()
+        for file_to_remove in files_to_remove:
+            print(f'removing: {file_to_remove}')
+            shutil.rmtree(file_to_remove)
 
     train_writer = tf.summary.FileWriter(
         f'{FLAGS.summaries_dir}/{FLAGS.train_dir}_{FLAGS.run_type}', sess.graph

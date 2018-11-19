@@ -66,7 +66,7 @@ class ResidualBlock(tf.keras.layers.Layer):
                 tf.layers.Conv2D(
                     self.channels,
                     self.kernel,
-                    [1, 1],
+                    dilation_rate=[2, 2],
                     name="conv2d_1",
                     activation=None,
                     padding="same",
@@ -76,7 +76,6 @@ class ResidualBlock(tf.keras.layers.Layer):
                 tf.layers.Conv2D(
                     self.channels,
                     self.kernel,
-                    [1, 1],
                     name="conv2d_2",
                     activation=None,
                     padding="same",
@@ -120,9 +119,19 @@ class Encoder(SummaryLayer):
     def __init__(
         self,
         channels,
+        hidden,
+        activation='relu',
         **kwargs,
     ):
         self.channels = channels
+        self.hidden = hidden
+        if activation == 'relu':
+            self.activation = tf.nn.relu
+        elif activation == 'tanh':
+            self.activation = tf.nn.tanh
+        else:
+            raise ValueError('unsupported activation')
+
         super().__init__(**kwargs)
 
     def build(self, input_shape):
@@ -130,8 +139,10 @@ class Encoder(SummaryLayer):
             tf.layers.Conv2D(
                 self.channels, [2, 2], [2, 2], name='conv_1', activation=None
             ),
-            tf.keras.layers.Activation('relu', name='relu_1'),
-            ResidualBlock(self.channels, kernel=[3, 3], activation=tf.nn.relu),
+            self.activation,
+            ResidualBlock(
+                self.channels, kernel=[3, 3], activation=self.activation
+            ),
             tf.layers.Conv2D(
                 self.channels,
                 [2, 2],
@@ -139,8 +150,10 @@ class Encoder(SummaryLayer):
                 name='conv_2',
                 activation=None,
             ),
-            tf.keras.layers.Activation('relu', name='relu_2'),
-            ResidualBlock(self.channels, kernel=[3, 3], activation=tf.nn.relu),
+            self.activation,
+            ResidualBlock(
+                self.channels, kernel=[3, 3], activation=self.activation
+            ),
             tf.layers.Conv2D(
                 self.channels,
                 [2, 2],
@@ -148,10 +161,12 @@ class Encoder(SummaryLayer):
                 name='conv_3',
                 activation=None,
             ),
-            tf.keras.layers.Activation('relu', name='relu_3'),
-            ResidualBlock(self.channels, kernel=[3, 3], activation=tf.nn.relu),
+            self.activation,
+            ResidualBlock(
+                self.channels, kernel=[3, 3], activation=self.activation
+            ),
             tf.layers.Conv2D(
-                self.channels,
+                self.hidden,
                 [2, 2],
                 [2, 2],
                 name='conv_4',
@@ -166,9 +181,16 @@ class Decoder(SummaryLayer):
     def __init__(
         self,
         channels,
+        activation='relu',
         **kwargs,
     ):
         self.channels = channels
+        if activation == 'relu':
+            self.activation = tf.nn.relu
+        elif activation == 'tanh':
+            self.activation = tf.nn.tanh
+        else:
+            raise ValueError('unsupported activation')
         super().__init__(**kwargs)
 
     def build(self, input_shape):
@@ -179,27 +201,30 @@ class Decoder(SummaryLayer):
                 [2, 2],
                 name='deconv_2',
                 activation=None,
+            ), self.activation,
+            ResidualBlock(
+                self.channels, kernel=[3, 3], activation=self.activation
             ),
-            tf.keras.layers.Activation('relu', name='relu_2'),
-            ResidualBlock(self.channels, kernel=[3, 3], activation=tf.nn.relu),
             tf.layers.Conv2DTranspose(
                 self.channels,
                 [2, 2],
                 [2, 2],
                 name='deconv_3',
                 activation=None,
+            ), self.activation,
+            ResidualBlock(
+                self.channels, kernel=[3, 3], activation=self.activation
             ),
-            tf.keras.layers.Activation('relu', name='relu_3'),
-            ResidualBlock(self.channels, kernel=[3, 3], activation=tf.nn.relu),
             tf.layers.Conv2DTranspose(
                 self.channels,
                 [2, 2],
                 [2, 2],
                 name='deconv_4',
                 activation=None,
+            ), self.activation,
+            ResidualBlock(
+                self.channels, kernel=[3, 3], activation=self.activation
             ),
-            tf.keras.layers.Activation('relu', name='relu_4'),
-            ResidualBlock(self.channels, kernel=[3, 3], activation=tf.nn.relu),
             tf.layers.Conv2DTranspose(
                 self.channels,
                 [2, 2],
