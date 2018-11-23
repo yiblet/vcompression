@@ -15,6 +15,7 @@ import summary
 import util
 import layers
 import retrieval
+import time
 
 tf.reset_default_graph()
 tf.logging.set_verbosity(tf.logging.ERROR)
@@ -95,6 +96,7 @@ def create_estimator_spec(**kwargs):
 
 
 def model_fn(features, labels, mode, params):
+    print('running the model')
     original_dim = features.get_shape().as_list()[1:]
     channel = params['channel']
     train_summary_dir = params['train_summary_dir']
@@ -144,12 +146,14 @@ def model_fn(features, labels, mode, params):
     if FLAGS.use_tpu:
         optimizer = tf.contrib.tpu.CrossShardOptimizer(optimizer)
 
+    print_op = tf.print(features.get_shape())
     train_op = optimizer.minimize(train_loss)
+    train_op = tf.group(print_op, train_op)
 
     if tf.estimator.ModeKeys.EVAL:
         log_image_information(features, latent, channel, make_decoder)
 
-    return create_estimator_spec(
+    est = create_estimator_spec(
         mode=mode,
         predictions=predictions,
         loss=loss,
@@ -163,25 +167,44 @@ def model_fn(features, labels, mode, params):
             )
         ]
     )
+    print('returned')
+    return est
 
 
-def gen_input_fns():
-    train, test = retrieval.load_data()
+def input_fn(steps=None, test=False):
+    """Read CIFAR input data from a TFRecord dataset."""
+    batch_size = FLAGS.batch_size
 
-    return (
-        tf.estimator.inputs.numpy_input_fn(
-            train,
-            train,
-            batch_size=FLAGS.batch_size,
-            shuffle=True,
-        ),
-        tf.estimator.inputs.numpy_input_fn(
-            test,
-            test,
-            batch_size=FLAGS.batch_size,
-            shuffle=True,
-        ),
-    )
+    def parser(serialized_example):
+        """Parses a single tf.Example into image and label tensors."""
+        features = tf.parse_single_example(
+            serialized_example,
+            features={
+                "image": tf.FixedLenFeature([], tf.string),
+                "label": tf.FixedLenFeature([], tf.int64),
+            }
+        )
+        image = tf.decode_raw(features["image"], tf.uint8)
+        image.set_shape([3 * 32 * 32])
+        image = tf.cast(image, tf.float32) * (1. / 255) - 0.5
+        image = tf.transpose(tf.reshape(image, [3, 32, 32]))
+        label = tf.cast(features["label"], tf.int32)
+        return image, label
+
+    if test:
+        location = FLAGS.tf_records_dir + '/eval.tfrecords'
+    else:
+        location = FLAGS.tf_records_dir + '/train.tfrecords'
+
+    dataset = tf.data.TFRecordDataset([location])
+    dataset = dataset.map(parser, num_parallel_calls=batch_size)
+    dataset = dataset.shuffle(10000)
+    dataset = dataset.batch(FLAGS.batch_size, drop_remainder=True)
+    if steps is not None:
+        dataset = dataset.take(steps)
+    dataset = dataset.prefetch(100).cache()
+    dataset = dataset.prefetch(1)
+    return dataset
 
 
 def clean_logdir():
@@ -255,7 +278,7 @@ def main():
     clean_logdir()
 
     params = construct_params(channel=64)
-    train_input_fn, eval_input_fn = gen_input_fns()
+    # train_input_fn, eval_input_fn = gen_input_fns(sess)
 
     train_summary_dir = params['train_summary_dir']
     test_summary_dir = params['test_summary_dir']
@@ -283,9 +306,14 @@ def main():
         test_writer = tf.summary.FileWriter(test_summary_dir)
 
         for epoch in range(FLAGS.epochs):
-            estimator.evaluate(eval_input_fn, steps=1)
-            estimator.train(train_input_fn, steps=FLAGS.train_steps)
-            print(f'epoch: {epoch}')
+            estimator.evaluate(
+                lambda: input_fn(steps=1, test=True),
+                steps=1,
+            )
+
+            prev = time.time()
+            estimator.train(lambda: input_fn(steps=FLAGS.train_steps), steps=1)
+            print(f'{time.time() - prev} has passed on {600} steps')
 
     finally:
         # For now, TPU sessions must be shutdown separately from

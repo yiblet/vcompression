@@ -101,7 +101,7 @@ def define_flags(additional_flags=None):
     FLAGS.summary_frequency = 200    # @param {type: "number"}
     FLAGS.train_steps = 600    # @param {type: "number"}
     FLAGS.z_dims = 128    # @param {type: "number"}
-    FLAGS.summarize = True
+    FLAGS.summarize = False
 
     FLAGS.disable_residual_block = True
     FLAGS.tunnel_loc = 'yiblet'    # @param
@@ -120,6 +120,7 @@ def define_flags(additional_flags=None):
         FLAGS.debug = False
         FLAGS.directory = 'out'
         FLAGS.summaries_dir = 'local/summaries'
+        FLAGS.tf_records_dir = 'local/records'
         FLAGS.tpu_address = None
 
         print('running locally')
@@ -134,6 +135,7 @@ def define_flags(additional_flags=None):
         FLAGS.directory = '/gdrive/My Drive/data_mnist'
         summaries_dir = 'summaries'    # @param {type: "string"}
         FLAGS.summaries_dir = f'/gdrive/My Drive/{summaries_dir}'
+        FLAGS.tf_records_dir = FLAGS.data
         FLAGS.tpu_address = None
 
     if additional_flags is not None:
