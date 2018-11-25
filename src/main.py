@@ -21,44 +21,16 @@ tf.reset_default_graph()
 tf.logging.set_verbosity(tf.logging.ERROR)
 
 
-def make_latent_distribution_layer():
-    tfd = tfp.distributions
-    with summary.SummaryScope('latent_distributions') as scope:
-        categorical = tf.get_variable(
-            name='categorical_distribution',
-            shape=[FLAGS.categorical_dims],
-        )
-        categorical = tf.nn.softmax(categorical)
-        loc = tf.get_variable(
-            name='logistic_loc_variables',
-            shape=[FLAGS.categorical_dims],
-        )
-        scale = tf.nn.softplus(
-            tf.get_variable(
-                name='logistic_scale_variables',
-                shape=[FLAGS.categorical_dims],
-            )
-        )
-        scope['categorical'] = categorical
-        scope['loc'] = loc
-        scope['scale'] = scale
-
-        return tfd.MixtureSameFamily(
-            mixture_distribution=tfd.Categorical(probs=categorical),
-            components_distribution=tfd.Normal(
-                loc=loc,
-                scale=scale,
-            )
-        )
+def make_latent_distribution_layer(latents):
+    return layers.LatentDistribution()(latents)
 
 
-def make_encoder_layer(data, channel, original_dim):
-    data = tf.reshape(data, (-1, *original_dim))
-    return layers.Encoder(channel, 32)(data)
+def make_encoder_layer(data):
+    return layers.Encoder(FLAGS.channel_dims, FLAGS.hidden_dims)(data)
 
 
-def make_decoder_layer(code, channel):
-    return layers.Decoder(channel)(code)
+def make_decoder_layer(code):
+    return layers.Decoder(FLAGS.channel_dims)(code)
 
 
 def log_sampling_information(latent, distribution):
@@ -70,7 +42,7 @@ def log_sampling_information(latent, distribution):
         )
 
 
-def log_image_information(features, latent, channel, make_decoder):
+def log_image_information(features, latent, decoder):
     with tf.name_scope('sampling'):
         random_sub_batch_dims = tf.random_uniform(
             [10],
@@ -82,93 +54,65 @@ def log_image_information(features, latent, channel, make_decoder):
         latent_random_sub_batch = tf.gather(latent, random_sub_batch_dims)
         data_random_sub_batch = tf.gather(features, random_sub_batch_dims)
 
-        generated = make_decoder(latent_random_sub_batch, channel)
+        generated = decoder(latent_random_sub_batch)
 
         image_comparison = tf.concat([data_random_sub_batch, generated], 2)
     return tf.summary.image('comparison', image_comparison, max_outputs=10)
 
 
-def create_estimator_spec(**kwargs):
-    if not FLAGS.use_tpu:
-        return tf.estimator.EstimatorSpec(**kwargs)
-    else:
-        return tf.contrib.tpu.TPUEstimatorSpec(**kwargs)
+def compressor_loss(input):
+    features, bpp, predictions = input
+
+    with summary.SummaryScope('loss') as scope:
+        original_dim = features.get_shape().as_list()[1:]
+        num_pixels = original_dim[0] * original_dim[1]
+        print(num_pixels)
+        bpp_flattened = tf.layers.flatten(bpp)
+        train_bpp = tf.reduce_mean(tf.reduce_sum(bpp_flattened, axis=[1]))
+        train_bpp /= -np.log(2) * num_pixels
+
+        train_mse = tf.reduce_mean(tf.squared_difference(features, predictions))
+        train_mse *= 255**2 / num_pixels
+        scope['mse'] = train_mse
+        scope['bpp'] = train_bpp
+
+    return train_mse * 0.05 + train_bpp
 
 
-def model_fn(features, labels, mode, params):
-    print('running the model')
+def construct_model(features):
     original_dim = features.get_shape().as_list()[1:]
-    channel = params['channel']
-    train_summary_dir = params['train_summary_dir']
-    test_summary_dir = params['test_summary_dir']
+    channel = FLAGS.channel_dims
+    hidden_latent_dims = FLAGS.hidden_dims
 
-    make_encoder = tf.make_template('encoder', make_encoder_layer)
-    make_decoder = tf.make_template('decoder', make_decoder_layer)
-    make_latent_distribution = tf.make_template(
+    encoder = tf.make_template('encoder', make_encoder_layer)
+    decoder = tf.make_template('decoder', make_decoder_layer)
+    latent_distribution = tf.make_template(
         'distribution', make_latent_distribution_layer
     )
 
-    distribution = make_latent_distribution()
-
-    # Define the model.
-    latent = make_encoder(
-        features, channel, original_dim
-    )    # (batch, z_dims, hidden_depth)
+    latent = encoder(features)
     latent = layers.Quantizer()(latent)
-    x_tilde = make_decoder(latent, channel)
-    num_pixels = original_dim[0] * original_dim[1]
 
-    stopped_latents = tf.stop_gradient(latent)
-    likelihoods = distribution.cdf(
-        tf.clip_by_value(stopped_latents + 0.5 / 255.0, 0.0, 1.0)
-    ) - distribution.cdf(
-        tf.clip_by_value(stopped_latents - 0.5 / 255.0, 0.0, 1.0)
-    )
+    x_tilde = decoder(latent)
+    latent_dist = layers.LatentDistribution()
+    bpp = latent_dist(latent)
+    log_image_information(features, latent, decoder)
+    log_sampling_information(latent, latent_dist.distribution)
+    loss = tf.keras.layers.Lambda(compressor_loss)([features, bpp, x_tilde])
 
-    log_sampling_information(stopped_latents, distribution)
+    # model = tf.keras.Model(
+    #     inputs=[features],
+    #     outputs=[loss],
+    # )
 
-    with summary.SummaryScope('losses') as scope:
-        bpp_flattened = tf.layers.flatten(tf.log(likelihoods))
-        train_bpp = tf.reduce_mean(tf.reduce_sum(bpp_flattened, axis=[1]))
+    # model.compile(
+    #     optimizer='adam',
+    #     loss=lambda _, x: x,
+    # )
 
-        train_bpp /= -np.log(2) * num_pixels
-        train_mse = tf.reduce_mean(tf.squared_difference(features, x_tilde))
-        train_mse *= 255**2 / num_pixels
-        train_loss = train_mse * 0.05 + train_bpp
-        scope['likelihoods'] = likelihoods
-        scope['bpp'] = train_bpp
-        scope['mse'] = train_mse
-        scope['loss'] = train_loss
-
-    predictions = x_tilde
-    loss = train_loss
-    optimizer = tf.train.AdamOptimizer(FLAGS.learning_rate)
-    if FLAGS.use_tpu:
-        optimizer = tf.contrib.tpu.CrossShardOptimizer(optimizer)
-
-    print_op = tf.print(features.get_shape())
-    train_op = optimizer.minimize(train_loss)
-    train_op = tf.group(print_op, train_op)
-
-    if tf.estimator.ModeKeys.EVAL:
-        log_image_information(features, latent, channel, make_decoder)
-
-    est = create_estimator_spec(
-        mode=mode,
-        predictions=predictions,
-        loss=loss,
-        train_op=train_op,
-        evaluation_hooks=[
-            util.MetadataHook(save_steps=10, output_dir=test_summary_dir),
-            tf.train.SummarySaverHook(
-                save_steps=1,
-                output_dir=test_summary_dir,
-                summary_op=tf.summary.merge_all(),
-            )
-        ]
-    )
-    print('returned')
-    return est
+    train_op = tf.train.AdamOptimizer(FLAGS.learning_rate).minimize(loss)
+    merged = tf.summary.merge_all()
+    return features, loss, train_op, merged
 
 
 def input_fn(steps=None, test=False):
@@ -188,8 +132,8 @@ def input_fn(steps=None, test=False):
         image.set_shape([3 * 32 * 32])
         image = tf.cast(image, tf.float32) * (1. / 255) - 0.5
         image = tf.transpose(tf.reshape(image, [3, 32, 32]))
-        label = tf.cast(features["label"], tf.int32)
-        return image, label
+        image = tf.image.rot90(image, 3)
+        return image
 
     if test:
         location = FLAGS.tf_records_dir + '/eval.tfrecords'
@@ -197,13 +141,12 @@ def input_fn(steps=None, test=False):
         location = FLAGS.tf_records_dir + '/train.tfrecords'
 
     dataset = tf.data.TFRecordDataset([location])
-    dataset = dataset.map(parser, num_parallel_calls=batch_size)
+    dataset = dataset.map(
+        parser, num_parallel_calls=batch_size
+    ).cache().repeat()
     dataset = dataset.shuffle(10000)
     dataset = dataset.batch(FLAGS.batch_size, drop_remainder=True)
-    if steps is not None:
-        dataset = dataset.take(steps)
-    dataset = dataset.prefetch(100).cache()
-    dataset = dataset.prefetch(1)
+    dataset = dataset.prefetch(100)
     return dataset
 
 
@@ -220,53 +163,34 @@ def clean_logdir():
                 shutil.rmtree(file_to_remove)
 
 
-def construct_params(channel=64):
-    return {
-        'channel':
-        64,
-        'train_summary_dir':
-        f'{FLAGS.summaries_dir}/{FLAGS.train_dir}_{FLAGS.run_type}',
-        'test_summary_dir':
-        f'{FLAGS.summaries_dir}/{FLAGS.test_dir}_{FLAGS.run_type}',
-    }
+class LoggerCallback(tf.keras.callbacks.Callback):
 
+    def on_train_begin(self, logs={}):
+        self.logs = {}
+        self.merged = tf.summary.merge_all()
+        self.writer = tf.summary.FileWriter(
+            f'{FLAGS.summaries_dir}/{FLAGS.test_dir}_{FLAGS.run_type}'
+        )
+        self._epoch = 0
 
-def construct_estimator(params):
-    params = construct_params(channel=64)
-    train_summary_dir = params['train_summary_dir']
-    test_summary_dir = params['test_summary_dir']
-    if not FLAGS.use_tpu:
-        print('NOT using tpu')
-        config = tf.estimator.RunConfig(
-            model_dir=train_summary_dir,
-            save_summary_steps=200,
-        )
-        estimator = tf.estimator.Estimator(
-            model_fn, params=params, config=config
-        )
+    def _fetch_callback(self, summary):
+        self.writer.add_summary(summary, self._epoch)
 
-    else:
-        print('using tpu')
-        tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
-            FLAGS.tpu_address
-        )
-        tpu_config = tf.contrib.tpu.TPUConfig()
+    def on_epoch_begin(self, epoch, logs={}):
 
-        config = tf.contrib.tpu.RunConfig(
-            cluster=tpu_cluster_resolver,
-            model_dir=train_summary_dir,
-            save_summary_steps=200,
-            tpu_config=tpu_config,
-        )
+        if self.merged not in self.model.test_function.fetches:
+            self.model.test_function.fetches.append(self.merged)
+            self.model.test_function.fetch_callbacks[self.merged
+                                                    ] = self._fetch_callback
 
-        estimator = tf.contrib.tpu.TPUEstimator(
-            model_fn,
-            params=params,
-            config=config,
-            train_batch_size=FLAGS.batch_size,
-            eval_batch_size=FLAGS.batch_size,
-        )
-    return estimator
+    def on_epoch_end(self, epoch, logs={}):
+        if self.merged in self.model.test_function.fetches:
+            self.model.test_function.fetches.remove(self.merged)
+
+        if self.merged in self.model.test_function.fetch_callbacks:
+            self.model.test_function.fetch_callbacks.pop(self.merged)
+
+        self._epoch += 1
 
 
 def main():
@@ -277,15 +201,20 @@ def main():
 
     clean_logdir()
 
-    params = construct_params(channel=64)
-    # train_input_fn, eval_input_fn = gen_input_fns(sess)
+    train_data_iter = input_fn().make_one_shot_iterator()
+    test_data_iter = input_fn(test=True).make_one_shot_iterator()
 
-    train_summary_dir = params['train_summary_dir']
-    test_summary_dir = params['test_summary_dir']
+    input, loss, train_op, merged = construct_model(train_data_iter.get_next())
 
-    estimator = construct_estimator(params)
+    train_writer = tf.summary.FileWriter(
+        f'{FLAGS.summaries_dir}/{FLAGS.train_dir}_{FLAGS.run_type}', sess.graph
+    )
+    test_writer = tf.summary.FileWriter(
+        f'{FLAGS.summaries_dir}/{FLAGS.test_dir}_{FLAGS.run_type}',
+    )
 
     try:
+
         sess.run(tf.global_variables_initializer())
 
         if FLAGS.use_tpu:
@@ -303,17 +232,59 @@ def main():
         if not os.path.exists(FLAGS.directory):
             os.mkdir(FLAGS.directory)
 
-        test_writer = tf.summary.FileWriter(test_summary_dir)
-
         for epoch in range(FLAGS.epochs):
-            estimator.evaluate(
-                lambda: input_fn(steps=1, test=True),
-                steps=1,
-            )
+            feed = {}
 
-            prev = time.time()
-            estimator.train(lambda: input_fn(steps=FLAGS.train_steps), steps=1)
-            print(f'{time.time() - prev} has passed on {600} steps')
+            test_loss, summary = sess.run([loss, merged], feed)
+            test_writer.add_summary(summary, FLAGS.train_steps * epoch)
+            print(f'Epoch {epoch} elbo: {test_loss}')
+
+            # training step
+            for train_step in range(FLAGS.train_steps):
+                feed = {}
+
+                global_step = FLAGS.train_steps * epoch + train_step
+                if global_step == 0:
+                    run_options = tf.RunOptions(
+                        trace_level=tf.RunOptions.FULL_TRACE
+                    )
+                    run_metadata = tf.RunMetadata()
+                    _, summary = sess.run([train_op, merged],
+                                          feed,
+                                          options=run_options,
+                                          run_metadata=run_metadata)
+                    train_writer.add_summary(summary, global_step)
+                    train_writer.add_run_metadata(
+                        run_metadata,
+                        f'step {global_step}',
+                        global_step=global_step
+                    )
+                elif train_step % FLAGS.summary_frequency == 0:
+                    _, summary = sess.run([train_op, merged], feed)
+                    train_writer.add_summary(summary, global_step)
+                else:
+                    sess.run([train_op], feed)
+
+        # print(model.summary())
+        # model.fit(
+        #     input_fn(),
+        #     validation_data=input_fn(test=True),
+        #     validation_steps=1,
+        #     steps_per_epoch=600,
+        #     epochs=1000,
+        #     verbose=1,
+        #     callbacks=[LoggerCallback()]
+        # )
+
+        # for epoch in range(FLAGS.epochs):
+        # estimator.evaluate(
+        #     lambda: input_fn(steps=1, test=True),
+        #     steps=1,
+        # )
+
+        # prev = time.time()
+        # estimator.train(lambda: input_fn(steps=FLAGS.train_steps), steps=1)
+        # print(f'{time.time() - prev} has passed on {600} steps')
 
     finally:
         # For now, TPU sessions must be shutdown separately from

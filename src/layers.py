@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from global_variables import *
 import summary
 import tensorflow as tf
+import tensorflow_probability as tfp
 
 
 class Quantizer(tf.keras.layers.Layer):
@@ -23,7 +24,65 @@ class Quantizer(tf.keras.layers.Layer):
         return quantizer(input)
 
 
-class ResidualBlock(tf.keras.layers.Layer):
+class LatentDistribution(tf.keras.layers.Layer):
+
+    @property
+    def distribution(self):
+        if not self.built:
+            self.build(None)
+
+        return self._distribution
+
+    def build(self, input_shape):
+        tfd = tfp.distributions
+
+        with summary.SummaryScope('latent_distributions') as scope:
+            categorical = self.add_weight(
+                name='categorical_distribution',
+                shape=[FLAGS.categorical_dims],
+                trainable=True,
+            )
+            categorical = tf.nn.softmax(categorical)
+            loc = self.add_weight(
+                name='logistic_loc_variables',
+                shape=[FLAGS.categorical_dims],
+                trainable=True,
+            )
+            scale = tf.nn.softplus(
+                self.add_weight(
+                    name='logistic_scale_variables',
+                    shape=[FLAGS.categorical_dims],
+                    trainable=True,
+                )
+            )
+            scope['categorical'] = categorical
+            scope['loc'] = loc
+            scope['scale'] = scale
+
+        self.vars = [categorical, loc, scale]
+        self._distribution = tfd.MixtureSameFamily(
+            mixture_distribution=tfd.Categorical(probs=categorical),
+            components_distribution=tfd.Normal(
+                loc=loc,
+                scale=scale,
+            )
+        )
+
+        self.built = True
+
+    def call(self, latent):
+
+        stopped_latents = tf.stop_gradient(latent)
+        likelihoods = self._distribution.cdf(
+            tf.clip_by_value(stopped_latents + 0.5 / 255.0, 0.0, 1.0)
+        ) - self._distribution.cdf(
+            tf.clip_by_value(stopped_latents - 0.5 / 255.0, 0.0, 1.0)
+        )
+
+        return tf.log(likelihoods, name='bpp')
+
+
+class ResidualBlock(tf.keras.Model):
     """Basic Residual Block"""
 
     def __init__(
@@ -33,9 +92,11 @@ class ResidualBlock(tf.keras.layers.Layer):
         activation=None,
         use_batch_norm=False,
         batch_norm_last=True,
+        trainable=True,
         **kwargs
     ):
-        tf.keras.layers.Layer.__init__(self, **kwargs)
+        super().__init__(self, **kwargs)
+        self.trainable = True
         self.batch_norm_last = batch_norm_last
         self.channels = channels
         self.kernel = kernel
@@ -44,14 +105,11 @@ class ResidualBlock(tf.keras.layers.Layer):
         if not isinstance(activation, list):
             activation = [activation, activation]
         self.activation = activation
+        self.build(None)
 
-    def build(self, input_shape):
-
+    def build(self, _):
         if FLAGS.disable_residual_block:
             return
-
-        if len(input_shape) != 4:
-            raise ValueError("input needs to have rank 4")
 
         create_batch_norm = None
         if self.use_batch_norm:
@@ -62,7 +120,7 @@ class ResidualBlock(tf.keras.layers.Layer):
             last_batch_norm = tf.layers.BatchNormalization()
 
         with tf.name_scope(self.name):
-            self.layers = [
+            self.model_layers = [
                 tf.layers.Conv2D(
                     self.channels,
                     self.kernel,
@@ -70,6 +128,7 @@ class ResidualBlock(tf.keras.layers.Layer):
                     name="conv2d_1",
                     activation=None,
                     padding="same",
+                    trainable=self.trainable,
                 ),
                 create_batch_norm,
                 self.activation[0],
@@ -79,42 +138,44 @@ class ResidualBlock(tf.keras.layers.Layer):
                     name="conv2d_2",
                     activation=None,
                     padding="same",
+                    trainable=self.trainable,
                 ),
                 last_batch_norm,
             ]
-
-        super().build(input_shape)
 
     def call(self, input):
         if FLAGS.disable_residual_block:
             return input
 
         cur = input
-        for layer in self.layers:
+        for layer in self.model_layers:
             if layer is not None:
                 cur = layer(cur)
 
         return self.activation[1](cur + input)
 
 
-class SummaryLayer(tf.keras.layers.Layer):
+class SummaryModel(tf.keras.Model):
 
     def __init__(
         self,
         silent=False,
         **kwargs,
     ):
-        self.silent = silent
         super().__init__(**kwargs)
+        self.silent = silent
+
+    def build(self, _):
+        pass
 
     def call(self, input):
         with summary.SummaryScope(self.name) as scope:
             scope['input'] = input
-            output = scope.sequential(input, self.layers)
+            output = scope.sequential(input, self.model_layers)
         return output
 
 
-class Encoder(SummaryLayer):
+class Encoder(SummaryModel):
 
     def __init__(
         self,
@@ -123,19 +184,19 @@ class Encoder(SummaryLayer):
         activation='relu',
         **kwargs,
     ):
+        super().__init__(**kwargs)
         self.channels = channels
         self.hidden = hidden
         if activation == 'relu':
-            self.activation = tf.nn.relu
+            self.activation = tf.keras.layers.Activation('relu')
         elif activation == 'tanh':
-            self.activation = tf.nn.tanh
+            self.activation = tf.keras.layers.Activation('tanh')
         else:
             raise ValueError('unsupported activation')
-
-        super().__init__(**kwargs)
+        self.build(None)
 
     def build(self, input_shape):
-        self.layers = [
+        self.model_layers = [
             tf.layers.Conv2D(
                 self.channels, [2, 2], [2, 2], name='conv_1', activation=None
             ),
@@ -176,7 +237,7 @@ class Encoder(SummaryLayer):
         super().build(input_shape)
 
 
-class Decoder(SummaryLayer):
+class Decoder(SummaryModel):
 
     def __init__(
         self,
@@ -184,17 +245,18 @@ class Decoder(SummaryLayer):
         activation='relu',
         **kwargs,
     ):
+        super().__init__(**kwargs)
         self.channels = channels
         if activation == 'relu':
-            self.activation = tf.nn.relu
+            self.activation = tf.keras.layers.Activation('relu')
         elif activation == 'tanh':
-            self.activation = tf.nn.tanh
+            self.activation = tf.keras.layers.Activation('tanh')
         else:
             raise ValueError('unsupported activation')
-        super().__init__(**kwargs)
+        self.build(None)
 
     def build(self, input_shape):
-        self.layers = [
+        self.model_layers = [
             tf.layers.Conv2DTranspose(
                 self.channels,
                 [2, 2],
