@@ -93,22 +93,22 @@ def define_flags(additional_flags=None):
     if (not reset) and FLAGS.is_set:
         return
 
-    FLAGS.batch_size = 16    # @param {type: "number"}
     FLAGS.categorical_dims = 5
-    FLAGS.channel_dims = 64
-    FLAGS.disable_residual_block = True
+    FLAGS.batch_size = 16    # @param {type: "number"}
     FLAGS.epochs = 1000    # @param {type: "number"}
-    FLAGS.hidden_dims = 32    # @param {type: "number"}
     FLAGS.is_set = True
     FLAGS.learning_rate = 1e-3    # @param {type: "number"}
-    FLAGS.run_type = 'primary'
-    FLAGS.summarize = True
     FLAGS.summary_frequency = 200    # @param {type: "number"}
+    FLAGS.train_steps = 600    # @param {type: "number"}
+    FLAGS.z_dims = 128    # @param {type: "number"}
+    FLAGS.summarize = True
+
+    FLAGS.disable_residual_block = True
+    FLAGS.tunnel_loc = 'yiblet'    # @param
     FLAGS.tensorboard_port = 8080    # @param {type : "number"}
+    FLAGS.run_type = 'primary'
     FLAGS.test_dir = 'test'
     FLAGS.train_dir = 'train'
-    FLAGS.train_steps = 600    # @param {type: "number"}
-    FLAGS.tunnel_loc = 'yiblet'    # @param
 
     if hasattr(additional_flags, 'local'):
         FLAGS.local = additional_flags.local
@@ -120,7 +120,6 @@ def define_flags(additional_flags=None):
         FLAGS.debug = False
         FLAGS.directory = 'out'
         FLAGS.summaries_dir = 'local/summaries'
-        FLAGS.tf_records_dir = 'local/records'
         FLAGS.tpu_address = None
 
         print('running locally')
@@ -135,12 +134,9 @@ def define_flags(additional_flags=None):
         FLAGS.directory = '/gdrive/My Drive/data_mnist'
         summaries_dir = 'summaries'    # @param {type: "string"}
         FLAGS.summaries_dir = f'/gdrive/My Drive/{summaries_dir}'
-        FLAGS.tf_records_dir = FLAGS.data
         FLAGS.tpu_address = None
 
     if additional_flags is not None:
         FLAGS.bulk_update(additional_flags)
-
-    FLAGS.use_tpu = FLAGS.tpu_address is not None
 
     run_subprocesses()

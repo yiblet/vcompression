@@ -15,22 +15,48 @@ import summary
 import util
 import layers
 import retrieval
-import time
 
 tf.reset_default_graph()
-tf.logging.set_verbosity(tf.logging.ERROR)
 
 
-def make_latent_distribution_layer(latents):
-    return layers.LatentDistribution()(latents)
+def make_latent_distribution_layer():
+    tfd = tfp.distributions
+    with summary.SummaryScope('latent_distributions') as scope:
+        categorical = tf.get_variable(
+            name='categorical_distribution',
+            shape=[FLAGS.categorical_dims],
+        )
+        categorical = tf.nn.softmax(categorical)
+        loc = tf.get_variable(
+            name='logistic_loc_variables',
+            shape=[FLAGS.categorical_dims],
+        )
+        scale = tf.nn.softplus(
+            tf.get_variable(
+                name='logistic_scale_variables',
+                shape=[FLAGS.categorical_dims],
+            )
+        )
+        scope['categorical'] = categorical
+        scope['loc'] = loc
+        scope['scale'] = scale
+
+        return tfd.MixtureSameFamily(
+            mixture_distribution=tfd.Categorical(probs=categorical),
+            components_distribution=tfd.Normal(
+                loc=loc,
+                scale=scale,
+            )
+        )
 
 
-def make_encoder_layer(data):
-    return layers.Encoder(FLAGS.channel_dims, FLAGS.hidden_dims)(data)
+def make_encoder_layer(data, channel, original_dim):
+    data = tf.reshape(data, (-1, *original_dim))
+    return layers.Encoder(channel, 32)(data)
 
 
-def make_decoder_layer(code):
-    return layers.Decoder(FLAGS.channel_dims)(code)
+def make_decoder_layer(code, channel):
+    return layers.Decoder(channel)(code)
 
 
 def log_sampling_information(latent, distribution):
@@ -42,169 +68,122 @@ def log_sampling_information(latent, distribution):
         )
 
 
-def log_image_information(features, latent, decoder):
-    with tf.name_scope('sampling'):
-        random_sub_batch_dims = tf.random_uniform(
-            [10],
-            minval=0,
-            maxval=tf.shape(features, out_type=tf.int32)[0],
-            dtype=tf.int32,
-        )
+def construct_vae(original_dim, channel):
 
-        latent_random_sub_batch = tf.gather(latent, random_sub_batch_dims)
-        data_random_sub_batch = tf.gather(features, random_sub_batch_dims)
+    data = tf.placeholder(tf.float32, [None, *original_dim])
 
-        generated = decoder(latent_random_sub_batch)
-
-        image_comparison = tf.concat([data_random_sub_batch, generated], 2)
-    return tf.summary.image('comparison', image_comparison, max_outputs=10)
-
-
-def compressor_loss(input):
-    features, bpp, predictions = input
-
-    with summary.SummaryScope('loss') as scope:
-        original_dim = features.get_shape().as_list()[1:]
-        num_pixels = original_dim[0] * original_dim[1]
-        print(num_pixels)
-        bpp_flattened = tf.layers.flatten(bpp)
-        train_bpp = tf.reduce_mean(tf.reduce_sum(bpp_flattened, axis=[1]))
-        train_bpp /= -np.log(2) * num_pixels
-
-        train_mse = tf.reduce_mean(tf.squared_difference(features, predictions))
-        train_mse *= 255**2 / num_pixels
-        scope['mse'] = train_mse
-        scope['bpp'] = train_bpp
-
-    return train_mse * 0.05 + train_bpp
-
-
-def construct_model(features):
-    original_dim = features.get_shape().as_list()[1:]
-    channel = FLAGS.channel_dims
-    hidden_latent_dims = FLAGS.hidden_dims
-
-    encoder = tf.make_template('encoder', make_encoder_layer)
-    decoder = tf.make_template('decoder', make_decoder_layer)
-    latent_distribution = tf.make_template(
+    make_encoder = tf.make_template('encoder', make_encoder_layer)
+    make_decoder = tf.make_template('decoder', make_decoder_layer)
+    make_latent_distribution = tf.make_template(
         'distribution', make_latent_distribution_layer
     )
 
-    latent = encoder(features)
+    distribution = make_latent_distribution()
+
+    # Define the model.
+    latent = make_encoder(
+        data, channel, original_dim
+    )    # (batch, z_dims, hidden_depth)
     latent = layers.Quantizer()(latent)
+    x_tilde = make_decoder(latent, channel)
+    num_pixels = original_dim[0] * original_dim[1]
 
-    x_tilde = decoder(latent)
-    latent_dist = layers.LatentDistribution()
-    bpp = latent_dist(latent)
-    log_image_information(features, latent, decoder)
-    log_sampling_information(latent, latent_dist.distribution)
-    loss = tf.keras.layers.Lambda(compressor_loss)([features, bpp, x_tilde])
+    stopped_latents = tf.stop_gradient(latent)
+    likelihoods = distribution.cdf(
+        tf.clip_by_value(stopped_latents + 0.5 / 255.0, 0.0, 1.0)
+    ) - distribution.cdf(
+        tf.clip_by_value(stopped_latents - 0.5 / 255.0, 0.0, 1.0)
+    )
 
-    # model = tf.keras.Model(
-    #     inputs=[features],
-    #     outputs=[loss],
-    # )
+    log_sampling_information(stopped_latents, distribution)
+    with summary.SummaryScope('losses') as scope:
 
-    # model.compile(
-    #     optimizer='adam',
-    #     loss=lambda _, x: x,
-    # )
+        bpp_flattened = tf.layers.flatten(tf.log(likelihoods))
+        train_bpp = tf.reduce_mean(tf.reduce_sum(bpp_flattened, axis=[1]))
 
-    train_op = tf.train.AdamOptimizer(FLAGS.learning_rate).minimize(loss)
+        train_bpp /= -np.log(2) * num_pixels
+        train_mse = tf.reduce_mean(tf.squared_difference(data, x_tilde))
+        train_mse *= 255**2 / num_pixels
+        train_loss = train_mse * 0.05 + train_bpp
+        scope['likelihoods'] = likelihoods
+        scope['bpp'] = train_bpp
+        scope['mse'] = train_mse
+        scope['loss'] = train_loss
+
+    main_step = tf.train.AdamOptimizer(FLAGS.learning_rate) \
+        .minimize(train_loss)
+
+    random_sub_batch_dims = tf.random_uniform(
+        [10],
+        minval=0,
+        maxval=tf.shape(data, out_type=tf.int32)[0],
+        dtype=tf.int32,
+    )
+
+    latent_random_sub_batch = tf.gather(latent, random_sub_batch_dims)
+    data_random_sub_batch = tf.gather(data, random_sub_batch_dims)
+
+    generated = make_decoder(latent_random_sub_batch, channel)
+
     merged = tf.summary.merge_all()
-    return features, loss, train_op, merged
+
+    image_comparison = tf.concat([data_random_sub_batch, generated], 2)
+    comparison_summary = tf.summary.image(
+        'comparison', image_comparison, max_outputs=10
+    )
+
+    train_op = tf.group(main_step)
+
+    images_summary = tf.summary.merge([comparison_summary])
+
+    return (data, train_loss, latent, train_op, merged, images_summary)
 
 
-def input_fn(steps=None, test=False):
-    """Read CIFAR input data from a TFRecord dataset."""
-    batch_size = FLAGS.batch_size
-
-    def parser(serialized_example):
-        """Parses a single tf.Example into image and label tensors."""
-        features = tf.parse_single_example(
-            serialized_example,
-            features={
-                "image": tf.FixedLenFeature([], tf.string),
-                "label": tf.FixedLenFeature([], tf.int64),
-            }
-        )
-        image = tf.decode_raw(features["image"], tf.uint8)
-        image.set_shape([3 * 32 * 32])
-        image = tf.cast(image, tf.float32) * (1. / 255) - 0.5
-        image = tf.transpose(tf.reshape(image, [3, 32, 32]))
-        image = tf.image.rot90(image, 3)
-        return image
-
-    if test:
-        location = FLAGS.tf_records_dir + '/eval.tfrecords'
-    else:
-        location = FLAGS.tf_records_dir + '/train.tfrecords'
-
-    dataset = tf.data.TFRecordDataset([location])
-    dataset = dataset.map(
-        parser, num_parallel_calls=batch_size
-    ).cache().repeat()
-    dataset = dataset.shuffle(10000)
-    dataset = dataset.batch(FLAGS.batch_size, drop_remainder=True)
-    dataset = dataset.prefetch(100)
-    return dataset
+def gdn(input):
+    return tf.contrib.layers.gdn(input)
 
 
-def clean_logdir():
-    if os.path.exists(FLAGS.summaries_dir):
-        files_to_remove = [
-            f'{FLAGS.summaries_dir}/{dir}_{FLAGS.run_type}'
-            for dir in [FLAGS.test_dir, FLAGS.train_dir]
-        ]
-
-        for file_to_remove in files_to_remove:
-            print(f'removing: {file_to_remove}')
-            if os.path.isdir(file_to_remove):
-                shutil.rmtree(file_to_remove)
-
-
-class LoggerCallback(tf.keras.callbacks.Callback):
-
-    def on_train_begin(self, logs={}):
-        self.logs = {}
-        self.merged = tf.summary.merge_all()
-        self.writer = tf.summary.FileWriter(
-            f'{FLAGS.summaries_dir}/{FLAGS.test_dir}_{FLAGS.run_type}'
-        )
-        self._epoch = 0
-
-    def _fetch_callback(self, summary):
-        self.writer.add_summary(summary, self._epoch)
-
-    def on_epoch_begin(self, epoch, logs={}):
-
-        if self.merged not in self.model.test_function.fetches:
-            self.model.test_function.fetches.append(self.merged)
-            self.model.test_function.fetch_callbacks[self.merged
-                                                    ] = self._fetch_callback
-
-    def on_epoch_end(self, epoch, logs={}):
-        if self.merged in self.model.test_function.fetches:
-            self.model.test_function.fetches.remove(self.merged)
-
-        if self.merged in self.model.test_function.fetch_callbacks:
-            self.model.test_function.fetch_callbacks.pop(self.merged)
-
-        self._epoch += 1
+def inverse_gdn(input):
+    return tf.contrib.layers.gdn(input, inverse=True)
 
 
 def main():
-    if not FLAGS.use_tpu:
+    print('-----FLAGS----')
+    pprint.pprint(FLAGS.__dict__)
+    print('--------------')
+
+    (x_input, elbo, code, optimize, merged, images) = construct_vae(
+        original_dim=DIM,
+        channel=64,
+    )
+
+    print('---------------')
+    util.print_param_count()
+    print('---------------')
+    util.print_param_count('encoder')
+    print('---------------')
+    util.print_param_count('decoder')
+    print('---------------')
+
+    if FLAGS.debug:
+        return
+
+    train, test = retrieval.load_data()
+
+    if FLAGS.tpu_address is None:
         sess = tf.Session()
     else:
         sess = tf.Session(FLAGS.tpu_address)
 
-    clean_logdir()
+    if os.path.exists(FLAGS.summaries_dir):
+        files_to_remove = [
+            f'{FLAGS.summaries_dir}/{dir}_{FLAGS.run_type}'
+            for dir in [FLAGS.train_dir, FLAGS.test_dir]
+        ]
 
-    train_data_iter = input_fn().make_one_shot_iterator()
-    test_data_iter = input_fn(test=True).make_one_shot_iterator()
-
-    input, loss, train_op, merged = construct_model(train_data_iter.get_next())
+        for file_to_remove in files_to_remove:
+            print(f'removing: {file_to_remove}')
+            shutil.rmtree(file_to_remove)
 
     train_writer = tf.summary.FileWriter(
         f'{FLAGS.summaries_dir}/{FLAGS.train_dir}_{FLAGS.run_type}', sess.graph
@@ -212,12 +191,12 @@ def main():
     test_writer = tf.summary.FileWriter(
         f'{FLAGS.summaries_dir}/{FLAGS.test_dir}_{FLAGS.run_type}',
     )
+    print(f"logging at {FLAGS.summaries_dir}")
 
     try:
-
         sess.run(tf.global_variables_initializer())
 
-        if FLAGS.use_tpu:
+        if FLAGS.tpu_address is not None:
             print('Initializing TPUs...')
             sess.run(tf.contrib.tpu.initialize_system())
 
@@ -233,15 +212,27 @@ def main():
             os.mkdir(FLAGS.directory)
 
         for epoch in range(FLAGS.epochs):
-            feed = {}
+            feed = {
+                x_input:
+                test[np.random.choice(test.shape[0], 100, replace=False), ...].
+                reshape([-1, *DIM])
+            }
 
-            test_loss, summary = sess.run([loss, merged], feed)
+            test_elbo, summary, images_summary = sess.run([
+                elbo, merged, images
+            ], feed)
             test_writer.add_summary(summary, FLAGS.train_steps * epoch)
-            print(f'Epoch {epoch} elbo: {test_loss}')
+            test_writer.add_summary(images_summary, FLAGS.train_steps * epoch)
+            print(f'Epoch {epoch} elbo: {test_elbo}')
 
             # training step
             for train_step in range(FLAGS.train_steps):
-                feed = {}
+                feed = {
+                    x_input:
+                    train[np.random.choice(
+                        train.shape[0], FLAGS.batch_size, replace=False
+                    ), ...].reshape([-1, *DIM])
+                }
 
                 global_step = FLAGS.train_steps * epoch + train_step
                 if global_step == 0:
@@ -249,7 +240,7 @@ def main():
                         trace_level=tf.RunOptions.FULL_TRACE
                     )
                     run_metadata = tf.RunMetadata()
-                    _, summary = sess.run([train_op, merged],
+                    _, summary = sess.run([optimize, merged],
                                           feed,
                                           options=run_options,
                                           run_metadata=run_metadata)
@@ -260,31 +251,10 @@ def main():
                         global_step=global_step
                     )
                 elif train_step % FLAGS.summary_frequency == 0:
-                    _, summary = sess.run([train_op, merged], feed)
+                    _, summary = sess.run([optimize, merged], feed)
                     train_writer.add_summary(summary, global_step)
                 else:
-                    sess.run([train_op], feed)
-
-        # print(model.summary())
-        # model.fit(
-        #     input_fn(),
-        #     validation_data=input_fn(test=True),
-        #     validation_steps=1,
-        #     steps_per_epoch=600,
-        #     epochs=1000,
-        #     verbose=1,
-        #     callbacks=[LoggerCallback()]
-        # )
-
-        # for epoch in range(FLAGS.epochs):
-        # estimator.evaluate(
-        #     lambda: input_fn(steps=1, test=True),
-        #     steps=1,
-        # )
-
-        # prev = time.time()
-        # estimator.train(lambda: input_fn(steps=FLAGS.train_steps), steps=1)
-        # print(f'{time.time() - prev} has passed on {600} steps')
+                    sess.run([optimize], feed)
 
     finally:
         # For now, TPU sessions must be shutdown separately from
