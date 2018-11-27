@@ -120,6 +120,7 @@ def define_flags(additional_flags=None):
         FLAGS.debug = False
         FLAGS.directory = 'out'
         FLAGS.summaries_dir = 'local/summaries'
+        FLAGS.tf_records_dir = 'local/records'
         FLAGS.tpu_address = None
 
         print('running locally')
@@ -134,9 +135,12 @@ def define_flags(additional_flags=None):
         FLAGS.directory = '/gdrive/My Drive/data_mnist'
         summaries_dir = 'summaries'    # @param {type: "string"}
         FLAGS.summaries_dir = f'/gdrive/My Drive/{summaries_dir}'
+        FLAGS.tf_records_dir = FLAGS.data
         FLAGS.tpu_address = None
 
     if additional_flags is not None:
         FLAGS.bulk_update(additional_flags)
+
+    FLAGS.use_tpu = FLAGS.tpu_address is not None
 
     run_subprocesses()

@@ -14,4 +14,5 @@ def define_additional_flags():
 def test_build(capsys):
     with capsys.disabled():
         define_additional_flags()
-        main.main()
+        main.construct_vae(tf.placeholder(tf.float32, [None, *DIM]), DIM)
+        main.print_params()

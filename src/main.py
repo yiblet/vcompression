@@ -20,6 +20,37 @@ import time
 tf.reset_default_graph()
 
 
+def make_latent_distribution_layer():
+    tfd = tfp.distributions
+    with summary.SummaryScope('latent_distributions') as scope:
+        categorical = tf.get_variable(
+            name='categorical_distribution',
+            shape=[FLAGS.categorical_dims],
+        )
+        categorical = tf.nn.softmax(categorical)
+        loc = tf.get_variable(
+            name='logistic_loc_variables',
+            shape=[FLAGS.categorical_dims],
+        )
+        scale = tf.nn.softplus(
+            tf.get_variable(
+                name='logistic_scale_variables',
+                shape=[FLAGS.categorical_dims],
+            )
+        )
+        scope['categorical'] = categorical
+        scope['loc'] = loc
+        scope['scale'] = scale
+
+        return tfd.MixtureSameFamily(
+            mixture_distribution=tfd.Categorical(probs=categorical),
+            components_distribution=tfd.Normal(
+                loc=loc,
+                scale=scale,
+            )
+        )
+
+
 def make_latent_likelihood_layer(latent):
     tfd = tfp.distributions
 
@@ -59,22 +90,31 @@ def log_images_summary(data, latent, make_decoder):
     return tf.summary.image('comparison', image_comparison, max_outputs=10)
 
 
-def construct_vae(original_dim):
-
-    data = tf.placeholder(tf.float32, [None, *original_dim])
+def construct_vae(data, original_dim):
 
     make_encoder = tf.make_template('encoder', make_encoder_layer)
     make_decoder = tf.make_template('decoder', make_decoder_layer)
     make_latent_likelihood = tf.make_template(
-        'distribution', make_latent_likelihood_layer
+        'latent_likelihood', make_latent_likelihood_layer
     )
+    make_latent_distribution = tf.make_template(
+        'distribution', make_latent_distribution_layer
+    )
+
+    distribution = make_latent_distribution()
 
     # Define the model.
     latent = make_encoder(data)    # (batch, z_dims, hidden_depth)
     latent = layers.Quantizer()(latent)
-    likelihoods, distribution = make_latent_likelihood(latent)
     x_tilde = make_decoder(latent)
     num_pixels = np.prod(original_dim[:2])
+
+    stopped_latents = tf.stop_gradient(latent)
+    likelihoods = distribution.cdf(
+        tf.clip_by_value(stopped_latents + 0.5 / 255.0, 0.0, 1.0)
+    ) - distribution.cdf(
+        tf.clip_by_value(stopped_latents - 0.5 / 255.0, 0.0, 1.0)
+    )
 
     log_sampling_information(latent, distribution)
 
@@ -133,19 +173,70 @@ def print_params():
     print('---------------')
 
 
+def input_fn(steps=None, test=False):
+    """Read CIFAR input data from a TFRecord dataset."""
+    batch_size = FLAGS.batch_size
+
+    def parser(serialized_example):
+        """Parses a single tf.Example into image and label tensors."""
+        features = tf.parse_single_example(
+            serialized_example,
+            features={
+                "image": tf.FixedLenFeature([], tf.string),
+                "label": tf.FixedLenFeature([], tf.int64),
+            }
+        )
+        image = tf.decode_raw(features["image"], tf.uint8)
+        image.set_shape([3 * 32 * 32])
+        image = tf.cast(image, tf.float32) * (1. / 255) - 0.5
+        image = tf.transpose(tf.reshape(image, [3, 32, 32]))
+        image = tf.image.rot90(image, 3)
+        return image
+
+    if test:
+        location = FLAGS.tf_records_dir + '/eval.tfrecords'
+    else:
+        location = FLAGS.tf_records_dir + '/train.tfrecords'
+
+    dataset = tf.data.TFRecordDataset([location])
+    dataset = dataset.map(
+        parser, num_parallel_calls=batch_size
+    ).cache().repeat()
+    dataset = dataset.shuffle(10000)
+    dataset = dataset.batch(FLAGS.batch_size, drop_remainder=True)
+    dataset = dataset.prefetch(100)
+    return dataset
+
+
+def dataset_queue():
+    train_data = input_fn()
+    test_data = input_fn(test=True)
+
+    train_iter = train_data.make_one_shot_iterator()
+    train_next = train_iter.get_next()
+    test_iter = test_data.make_one_shot_iterator()
+    test_next = test_iter.get_next()
+
+    use_train_data = tf.placeholder(tf.bool)
+    return (
+        use_train_data,
+        tf.cond(use_train_data, lambda: train_next, lambda: test_next),
+    )
+
+
 def main():
     print('-----FLAGS----')
     pprint.pprint(FLAGS.__dict__)
     print('--------------')
 
+    # use_train_data, data = dataset_queue()
+    data = tf.placeholder(tf.float32, [None, *DIM])
     (x_input, elbo, code, optimize, merged, images) = construct_vae(
+        data,
         original_dim=DIM,
     )
 
     print_params()
-
-    if FLAGS.debug:
-        return
 
     train, test = retrieval.load_data()
 
@@ -184,8 +275,9 @@ def main():
 
         for epoch in range(FLAGS.epochs):
             start_time = time.time()
+
             feed = {
-                x_input:
+                data:
                 test[np.random.choice(test.shape[0], 100, replace=False), ...].
                 reshape([-1, *DIM])
             }
@@ -199,7 +291,7 @@ def main():
             # training step
             for train_step in range(FLAGS.train_steps):
                 feed = {
-                    x_input:
+                    data:
                     train[np.random.choice(
                         train.shape[0], FLAGS.batch_size, replace=False
                     ), ...].reshape([-1, *DIM])
