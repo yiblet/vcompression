@@ -69,7 +69,7 @@ def print_param_count(scope=None):
     else:
         count = count_parameters()
         scope = 'vae'
-    print(f'number of parameters in {scope}: {count}')
+    return count
 
 
 def compress(arg):
