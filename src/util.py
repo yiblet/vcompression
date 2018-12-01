@@ -63,15 +63,6 @@ def count_parameters(scope=None):
     ])
 
 
-def print_param_count(scope=None):
-    if scope is not None:
-        count = count_parameters(scope=f".*{scope}")
-    else:
-        count = count_parameters()
-        scope = 'vae'
-    return count
-
-
 def compress(arg):
     placeholder = tf.placeholder(tf.float32, shape=[None, 64, 64, 3])
 

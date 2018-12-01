@@ -91,6 +91,7 @@ def log_images_summary(data, latent, make_decoder):
 
 
 def construct_vae(data, original_dim):
+    data, test = data
 
     make_encoder = tf.make_template('encoder', make_encoder_layer)
     make_decoder = tf.make_template('decoder', make_decoder_layer)
@@ -122,7 +123,7 @@ def construct_vae(data, original_dim):
         bpp_flattened = tf.layers.flatten(tf.log(likelihoods))
         train_bpp = tf.reduce_mean(tf.reduce_sum(bpp_flattened, axis=[1]))
         train_bpp /= -np.log(2) * num_pixels
-        train_mse = tf.reduce_mean(tf.squared_difference(data, x_tilde))
+        train_mse = tf.reduce_mean(tf.squared_difference(test, x_tilde))
         train_mse *= 255**2 / num_pixels
         train_loss = train_mse * 0.05 + train_bpp
         scope['likelihoods'] = likelihoods
@@ -148,22 +149,22 @@ def clean_log_directories():
         ]
 
         for file_to_remove in files_to_remove:
-            print(f'removing: {file_to_remove}')
-            shutil.rmtree(file_to_remove)
+            if os.path.exists(file_to_remove):
+                print(f'removing: {file_to_remove}')
+                shutil.rmtree(file_to_remove)
 
 
 def print_params():
     print('---------------')
-    total_count = util.print_param_count()
+    total_count = util.count_parameters()
     print(f'number of parameters in vae: {total_count}')
 
     params = {
-        scope: util.print_param_count(scope)
-        for scope in ['encoder', 'decoder']
+        scope: util.count_parameters(scope) for scope in ['encoder', 'decoder']
     }
 
     params['auxiliary nodes'] = total_count - sum(
-        count for _, count in params.items()
+        (count for _, count in params.items() if count is not None)
     )
 
     for scope, count in params.items():
@@ -188,10 +189,10 @@ def input_fn(steps=None, test=False):
         )
         image = tf.decode_raw(features["image"], tf.uint8)
         image.set_shape([3 * 32 * 32])
-        image = tf.cast(image, tf.float32) * (1. / 255) - 0.5
+        image = tf.cast(image, tf.float32) * (1. / 255)
         image = tf.transpose(tf.reshape(image, [3, 32, 32]))
         image = tf.image.rot90(image, 3)
-        return image
+        return image, image
 
     if test:
         location = FLAGS.tf_records_dir + '/eval.tfrecords'
@@ -229,8 +230,7 @@ def main():
     pprint.pprint(FLAGS.__dict__)
     print('--------------')
 
-    # use_train_data, data = dataset_queue()
-    data = tf.placeholder(tf.float32, [None, *DIM])
+    use_train_data, data = dataset_queue()
     (x_input, elbo, code, optimize, merged, images) = construct_vae(
         data,
         original_dim=DIM,
@@ -238,12 +238,12 @@ def main():
 
     print_params()
 
-    train, test = retrieval.load_data()
-
     if FLAGS.tpu_address is None:
-        sess = tf.Session()
+        sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
     else:
-        sess = tf.Session(FLAGS.tpu_address)
+        sess = tf.Session(
+            FLAGS.tpu_address, config=tf.ConfigProto(log_device_placement=True)
+        )
 
     clean_log_directories()
 
@@ -277,9 +277,7 @@ def main():
             start_time = time.time()
 
             feed = {
-                data:
-                test[np.random.choice(test.shape[0], 100, replace=False), ...].
-                reshape([-1, *DIM])
+                use_train_data: False,
             }
 
             test_elbo, summary, images_summary = sess.run([
@@ -291,10 +289,7 @@ def main():
             # training step
             for train_step in range(FLAGS.train_steps):
                 feed = {
-                    data:
-                    train[np.random.choice(
-                        train.shape[0], FLAGS.batch_size, replace=False
-                    ), ...].reshape([-1, *DIM])
+                    use_train_data: True,
                 }
 
                 global_step = FLAGS.train_steps * epoch + train_step
