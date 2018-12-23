@@ -169,7 +169,7 @@ def define_flags(additional_flags=None):
     )
     parser.add_argument(
         '-crop_size',
-        default=64,
+        default=32,
         type=str,
     )
 
@@ -192,6 +192,8 @@ def define_flags(additional_flags=None):
         print('running locally')
     else:
         print('mounting google drive')
+        from google.colab import auth
+        auth.authenticate_user()
         from google.colab import drive
         drive.mount('/gdrive')
 

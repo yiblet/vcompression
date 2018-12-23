@@ -174,8 +174,8 @@ def print_params():
 
 
 def dataset_queue():
-    train_data = retrieval.cifar_input_fn()
-    test_data = retrieval.cifar_input_fn(test=True)
+    train_data = retrieval.large_image_input_fn()
+    test_data = retrieval.large_image_input_fn(test=True)
 
     train_iter = train_data.make_one_shot_iterator()
     train_next = train_iter.get_next()
@@ -227,12 +227,6 @@ def main():
             sess.run(tf.contrib.tpu.initialize_system())
 
         print('Running ops')
-
-        try:
-            with (open(URL_LOG, 'r')) as log:
-                print(log.read())
-        except FileNotFoundError:
-            print('not running localtunnel')
 
         for epoch in range(FLAGS.epochs):
             start_time = time.time()

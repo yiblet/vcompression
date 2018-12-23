@@ -62,7 +62,8 @@ def large_image_input_fn(test=False):
         image = tf.image.random_crop(
             image, [FLAGS.crop_size, FLAGS.crop_size, 3]
         )
-        return tf.dtypes.cast(image, tf.float32) / 255.0
+        image = tf.dtypes.cast(image, tf.float32) / 255.0
+        return image, image
 
     return dataset.shuffle(10000).repeat(
     ).map(parse_image).filter(is_large_image).map(reshape).batch(
