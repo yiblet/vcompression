@@ -12,7 +12,6 @@ WIDTH = 32
 HEIGHT = WIDTH
 CHANNEL = 3
 DIM = (HEIGHT, WIDTH, CHANNEL)
-URL_LOG = 'url.txt'
 DEFAULT_SUMMARY_COLLECTION = 'summaries'
 
 
@@ -39,6 +38,8 @@ FLAGS = Namespace(is_set=False)
 
 def run_subprocesses():
     if not FLAGS.local:
+        import atexit
+
         if 'COLAB_TPU_ADDR' in os.environ:
             FLAGS.tpu_address = 'grpc://' + os.environ['COLAB_TPU_ADDR']
 
@@ -50,43 +51,27 @@ def run_subprocesses():
             print('TPU devices:')
             pprint.pprint(devices)
 
-        subprocess.Popen(
-            "kill $(ps -A | grep tensorboard | grep -o '^[0-9]\\+')",
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE
-        ).communicate()
-
-        subprocess.Popen(
-            "kill $(ps -A | grep lt | grep -o '^[0-9]\\+')",
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE
-        ).communicate()
-
-        subprocess.Popen(
-            f"rm '{URL_LOG}'",
-            shell=True,
-        )
-
-        print(
+        processes = [
             subprocess.Popen(
-                f"npm install -g localtunnel; \
-                        lt --port {FLAGS.tensorboard_port} -s \
-                        {FLAGS.tunnel_loc} > {URL_LOG} 2>&1 &",
+                "kill $(ps -A | grep tensorboard | grep -o '^[0-9]\\+')",
                 shell=True,
                 stdout=subprocess.PIPE,
                 stdin=subprocess.PIPE
-            ).communicate()[0].decode('ascii')
-        )
+            ),
+            subprocess.Popen(
+                f"python3 scripts/logger.py \
+                    '{FLAGS.summaries_dir}' \
+                    --port {FLAGS.tensorboard_port}",
+                shell=True,
+            ),
+        ]
 
-        subprocess.Popen(
-            f"tensorboard \
-                    --logdir '{FLAGS.summaries_dir}' \
-                    --port {FLAGS.tensorboard_port} \
-                    --host 0.0.0.0 >> tensorboard.log 2>&1 &",
-            shell=True,
-        )
+        def kill_subprocesses():
+            for process in processes:
+                process.kill()
+
+        atexit.register(kill_subprocesses)
+        print('goto: https://tensor.serveo.net to view logs')
 
 
 def define_flags(additional_flags=None):
@@ -200,8 +185,6 @@ def define_flags(additional_flags=None):
 
     if default_local:
         default_data = 'data/cifar10'
-        default_debug = False
-        default_directory = 'out'
         default_large_image_dir = 'local/images'
         default_summaries_dir = 'local/summaries'
         default_tf_records_dir = 'local/records'
@@ -213,12 +196,14 @@ def define_flags(additional_flags=None):
         drive.mount('/gdrive')
 
         default_data = '/gdrive/My Drive/cifar10'
-        default_debug = False
-        default_directory = '/gdrive/My Drive/data_mnist'
         default_large_image_dir = 'gs://yiblet_research/images'
-        default_summaries_dir = f'/gdrive/My Drive/summaries'
+        default_summaries_dir = 'gs://yiblet_research/summaries'
         default_tf_records_dir = default_data
         default_tpu_address = None
+
+    # defaults that are the same for both types
+    default_directory = 'out'
+    default_debug = False
 
     parser.add_argument(
         '-data',
