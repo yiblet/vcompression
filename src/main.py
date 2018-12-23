@@ -173,9 +173,10 @@ def print_params():
     print('---------------')
 
 
-def dataset_queue():
-    train_data = retrieval.large_image_input_fn()
-    test_data = retrieval.large_image_input_fn(test=True)
+def dataset_queue(input_fn=retrieval.cifar10):
+
+    train_data = input_fn()
+    test_data = input_fn(test=True)
 
     train_iter = train_data.make_one_shot_iterator()
     train_next = train_iter.get_next()
