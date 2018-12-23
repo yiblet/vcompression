@@ -5,6 +5,8 @@ import tensorflow as tf
 import numpy as np
 from global_variables import *
 
+DEFAULT_SUMMARY_COLLECTION = 'summary'
+
 
 def variable_summaries(key, var, collection=DEFAULT_SUMMARY_COLLECTION):
     with tf.name_scope(f'{key}_summaries'):
@@ -21,7 +23,24 @@ def variable_summaries(key, var, collection=DEFAULT_SUMMARY_COLLECTION):
             tf.summary.histogram('histogram', var)
 
 
+class Summarize(tf.keras.layers.Layer):
+
+    def __init__(self, key=None, **kwargs):
+        super().__init__(**kwargs)
+        self.key = key or self.name
+
+    def call(self, input):
+        variable_summaries(self.key, input)
+
+        if FLAGS.debug:
+            print(f'{self.key}: {input.shape}')
+
+        return input
+
+
 class SummaryScope(dict):
+    '''wrapper around tf.name_scope
+       that also logs all tensors that are put into the scope dict'''
 
     def __init__(
         self, scope_name, silent=False, collection=DEFAULT_SUMMARY_COLLECTION
@@ -30,6 +49,7 @@ class SummaryScope(dict):
         self.scope_name = scope_name
         self.collection = collection
         self.silent = silent
+        self.is_sequential = False
 
     def _get_name(self, name):
         name = name[:name.rindex('/')]
@@ -39,16 +59,26 @@ class SummaryScope(dict):
     def sequential(self, input, ops, include_input=False):
         prev_op = input
 
-        x = str("")
+        if FLAGS.debug:
+            print(f'printing {self.scope_name} dimensions')
 
         if include_input:
-            self[self._get_name(prev_op.name)] = prev_op
+            name = self._get_name(prev_op.name)
+            if FLAGS.debug:
+                print(f'{name}: {prev_op.shape}')
+            self[name] = prev_op
 
         for operation in ops:
             prev_op = operation(prev_op)
             name = self._get_name(prev_op.name)
+            if FLAGS.debug:
+                print(f'{name}: {prev_op.shape}')
             self[name] = prev_op
-            new_op = True
+
+        self.is_sequential = True
+
+        if FLAGS.debug:
+            print('')
 
         return prev_op
 
@@ -60,7 +90,7 @@ class SummaryScope(dict):
     def __exit__(self, type, value, traceback):
         self.scope.__exit__(type, value, traceback)
 
-        if FLAGS.debug:
+        if (not self.is_sequential) and FLAGS.debug:
             print(f'printing {self.scope_name} dimensions')
             for k, v in self.items():
                 print(f'{k}: {v.shape}')

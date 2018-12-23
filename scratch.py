@@ -1,29 +1,25 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[1]:
+
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
+import sys
+import os
 
 tfd = tfp.distributions
 
 tf.enable_eager_execution()
 
-constant = np.arange(0, 64, 1)
-constant = constant.reshape((1, 8, 8, 1)).astype(np.float)
+LARGE_IMAGE_DIR = 'local/images'
 
-input = tf.constant(constant, dtype=tf.float32)
+images = [f'{LARGE_IMAGE_DIR}/{image}' for image in os.listdir(LARGE_IMAGE_DIR)]
 
+dataset = tf.data.Dataset.from_tensor_slices(
+    tf.io.matching_files(f'{LARGE_IMAGE_DIR}/*jpg')
+)
 
-def convolute(input):
-    conv2d = tf.layers.Conv2D(1, [2, 2], name='test')
-    output = conv2d(input)
-    return output
-
-
-convolute = tf.make_template('convolute', convolute)
-
-print(convolute(input).shape)
-
-constant = np.arange(0, 36, 1)
-constant = constant.reshape((1, 6, 6, 1)).astype(np.float)
-input = tf.constant(constant, dtype=tf.float32)
-
-print(convolute(input).shape)
+dataset = dataset.map(parse_image).filter(is_large_image).map(reshape).take(2)
+print(list(dataset))

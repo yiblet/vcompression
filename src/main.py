@@ -1,6 +1,5 @@
 # @title The Big File { display-mode: "form" }
 from __future__ import absolute_import
-import os
 import shutil
 import pprint
 import tensorflow as tf
@@ -142,16 +141,16 @@ def construct_vae(data, original_dim):
 
 
 def clean_log_directories():
-    if os.path.exists(FLAGS.summaries_dir):
+    if tf.gfile.Exists(FLAGS.summaries_dir):
         files_to_remove = [
             f'{FLAGS.summaries_dir}/{dir}_{FLAGS.run_type}'
             for dir in [FLAGS.train_dir, FLAGS.test_dir]
         ]
 
         for file_to_remove in files_to_remove:
-            if os.path.exists(file_to_remove):
+            if tf.gfile.Exists(file_to_remove):
                 print(f'removing: {file_to_remove}')
-                shutil.rmtree(file_to_remove)
+                tf.gfile.DeleteRecursively(file_to_remove)
 
 
 def print_params():
@@ -174,44 +173,9 @@ def print_params():
     print('---------------')
 
 
-def input_fn(steps=None, test=False):
-    """Read CIFAR input data from a TFRecord dataset."""
-    batch_size = FLAGS.batch_size
-
-    def parser(serialized_example):
-        """Parses a single tf.Example into image and label tensors."""
-        features = tf.parse_single_example(
-            serialized_example,
-            features={
-                "image": tf.FixedLenFeature([], tf.string),
-                "label": tf.FixedLenFeature([], tf.int64),
-            }
-        )
-        image = tf.decode_raw(features["image"], tf.uint8)
-        image.set_shape([3 * 32 * 32])
-        image = tf.cast(image, tf.float32) * (1. / 255)
-        image = tf.transpose(tf.reshape(image, [3, 32, 32]))
-        image = tf.image.rot90(image, 3)
-        return image, image
-
-    if test:
-        location = FLAGS.tf_records_dir + '/eval.tfrecords'
-    else:
-        location = FLAGS.tf_records_dir + '/train.tfrecords'
-
-    dataset = tf.data.TFRecordDataset([location])
-    dataset = dataset.map(
-        parser, num_parallel_calls=batch_size
-    ).cache().repeat()
-    dataset = dataset.shuffle(10000)
-    dataset = dataset.batch(FLAGS.batch_size, drop_remainder=True)
-    dataset = dataset.prefetch(100)
-    return dataset
-
-
 def dataset_queue():
-    train_data = input_fn()
-    test_data = input_fn(test=True)
+    train_data = retrieval.cifar_input_fn()
+    test_data = retrieval.cifar_input_fn(test=True)
 
     train_iter = train_data.make_one_shot_iterator()
     train_next = train_iter.get_next()
@@ -239,7 +203,7 @@ def main():
     print_params()
 
     if FLAGS.tpu_address is None:
-        sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
+        sess = tf.Session(config=tf.ConfigProto(log_device_placement=False))
     else:
         sess = tf.Session(
             FLAGS.tpu_address, config=tf.ConfigProto(log_device_placement=True)
@@ -269,9 +233,6 @@ def main():
                 print(log.read())
         except FileNotFoundError:
             print('not running localtunnel')
-
-        if not os.path.exists(FLAGS.directory):
-            os.mkdir(FLAGS.directory)
 
         for epoch in range(FLAGS.epochs):
             start_time = time.time()

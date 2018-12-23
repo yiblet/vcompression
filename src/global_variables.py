@@ -6,6 +6,7 @@ import os
 import types
 import tensorflow as tf
 import pprint
+import argparse
 
 WIDTH = 32
 HEIGHT = WIDTH
@@ -93,50 +94,176 @@ def define_flags(additional_flags=None):
     if (not reset) and FLAGS.is_set:
         return
 
-    FLAGS.batch_size = 16    # @param {type: "number"}
-    FLAGS.categorical_dims = 5
-    FLAGS.channel_dims = 64
-    FLAGS.disable_residual_block = True
-    FLAGS.epochs = 1000    # @param {type: "number"}
-    FLAGS.hidden_dims = 32
-    FLAGS.is_set = True
-    FLAGS.learning_rate = 1e-3    # @param {type: "number"}
-    FLAGS.run_type = 'primary'
-    FLAGS.summarize = True
-    FLAGS.summary_frequency = 200    # @param {type: "number"}
-    FLAGS.tensorboard_port = 8080    # @param {type : "number"}
-    FLAGS.test_dir = 'test'
-    FLAGS.train_dir = 'train'
-    FLAGS.train_steps = 600    # @param {type: "number"}
-    FLAGS.tunnel_loc = 'yiblet'    # @param
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        '-batch_size',
+        default=16,
+        type=str,
+        help=f'the batch size, default: {16}'
+    )
+    parser.add_argument(
+        '-categorical_dims',
+        default=5,
+        type=str,
+    )
+    parser.add_argument(
+        '-channel_dims',
+        default=64,
+        type=str,
+    )
+    parser.add_argument(
+        '-disable_residual_block',
+        default=True,
+        type=bool,
+    )
+    parser.add_argument(
+        '-epochs',
+        default=1000,
+        type=str,
+    )
+    parser.add_argument(
+        '-hidden_dims',
+        default=32,
+        type=str,
+    )
+    parser.add_argument(
+        '-is_set',
+        default=True,
+        type=bool,
+    )
+    parser.add_argument(
+        '-learning_rate',
+        default=1e-3,
+        type=str,
+    )
+    parser.add_argument(
+        '-run_type',
+        default='primary',
+        type=str,
+    )
+    parser.add_argument(
+        '-summarize',
+        default=True,
+        type=bool,
+    )
+    parser.add_argument(
+        '-summary_frequency',
+        default=200,
+        type=str,
+    )
+    parser.add_argument(
+        '-tensorboard_port',
+        default=8080,
+        type=str,
+    )
+    parser.add_argument(
+        '-test_dir',
+        default='test',
+        type=str,
+    )
+    parser.add_argument(
+        '-train_dir',
+        default='train',
+        type=str,
+    )
+    parser.add_argument(
+        '-train_steps',
+        default=600,
+        type=str,
+    )
+    parser.add_argument(
+        '-tunnel_loc',
+        default='yiblet',
+        type=str,
+    )
+    parser.add_argument(
+        '-holdout_size',
+        default=200,
+        type=str,
+    )
+    parser.add_argument(
+        '-crop_size',
+        default=64,
+        type=str,
+    )
 
     if hasattr(additional_flags, 'local'):
-        FLAGS.local = additional_flags.local
+        default_local = additional_flags.local
     else:
-        FLAGS.local = os.uname()[1] == 'XPS'
+        default_local = os.uname()[1] == 'XPS'
 
-    if FLAGS.local:
-        FLAGS.data = 'data/cifar10'
-        FLAGS.debug = False
-        FLAGS.directory = 'out'
-        FLAGS.summaries_dir = 'local/summaries'
-        FLAGS.tf_records_dir = 'local/records'
-        FLAGS.tpu_address = None
+    parser.add_argument(
+        '-local',
+        default=default_local,
+    )
 
+    if default_local:
+        default_data = 'data/cifar10'
+        default_debug = False
+        default_directory = 'out'
+        default_large_image_dir = 'local/images'
+        default_summaries_dir = 'local/summaries'
+        default_tf_records_dir = 'local/records'
+        default_tpu_address = None
         print('running locally')
-
     else:
         print('mounting google drive')
         from google.colab import drive
         drive.mount('/gdrive')
 
-        FLAGS.data = '/gdrive/My Drive/cifar10'
-        FLAGS.debug = False
-        FLAGS.directory = '/gdrive/My Drive/data_mnist'
-        summaries_dir = 'summaries'    # @param {type: "string"}
-        FLAGS.summaries_dir = f'/gdrive/My Drive/{summaries_dir}'
-        FLAGS.tf_records_dir = FLAGS.data
-        FLAGS.tpu_address = None
+        default_data = '/gdrive/My Drive/cifar10'
+        default_debug = False
+        default_directory = '/gdrive/My Drive/data_mnist'
+        default_large_image_dir = 'gs://yiblet_research/images'
+        default_summaries_dir = f'/gdrive/My Drive/summaries'
+        default_tf_records_dir = default_data
+        default_tpu_address = None
+
+    parser.add_argument(
+        '-data',
+        default=default_data,
+        type=str,
+    )
+
+    parser.add_argument(
+        '-debug',
+        default=default_debug,
+        type=bool,
+    )
+
+    parser.add_argument(
+        '-directory',
+        default=default_directory,
+        type=str,
+    )
+
+    parser.add_argument(
+        '-large_image_dir',
+        default=default_large_image_dir,
+        type=str,
+        help='location of the images'
+    )
+
+    parser.add_argument(
+        '-summaries_dir',
+        default=default_summaries_dir,
+        type=str,
+    )
+
+    parser.add_argument(
+        '-tf_records_dir',
+        default=default_tf_records_dir,
+        type=str,
+    )
+
+    parser.add_argument(
+        '-tpu_address',
+        default=default_tpu_address,
+        type=str,
+    )
+
+    parser.parse_args(namespace=FLAGS)
 
     if additional_flags is not None:
         FLAGS.bulk_update(additional_flags)
@@ -144,3 +271,8 @@ def define_flags(additional_flags=None):
     FLAGS.use_tpu = FLAGS.tpu_address is not None
 
     run_subprocesses()
+
+
+if __name__ == "__main__":
+    define_flags()
+    pprint.pprint(FLAGS.__dict__)
