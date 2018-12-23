@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 
 
-def cifar_input_fn(steps=None, test=False):
+def cifar_input_fn(test=False):
     """Read CIFAR input data from a TFRecord dataset."""
     batch_size = FLAGS.batch_size
 

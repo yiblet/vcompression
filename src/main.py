@@ -173,7 +173,7 @@ def print_params():
     print('---------------')
 
 
-def dataset_queue(input_fn=retrieval.cifar10):
+def dataset_queue(input_fn=retrieval.cifar_input_fn):
 
     train_data = input_fn()
     test_data = input_fn(test=True)
