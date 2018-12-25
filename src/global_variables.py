@@ -37,7 +37,7 @@ FLAGS = Namespace(is_set=False)
 
 
 def run_subprocesses():
-    if (not FLAGS.local) and FLAGS.run_subprocesses:
+    if not FLAGS.local:
         import atexit
 
         if 'COLAB_TPU_ADDR' in os.environ:
@@ -51,27 +51,28 @@ def run_subprocesses():
             print('TPU devices:')
             pprint.pprint(devices)
 
-        processes = [
-            subprocess.Popen(
-                "kill $(ps -A | grep tensorboard | grep -o '^[0-9]\\+')",
-                shell=True,
-                stdout=subprocess.PIPE,
-                stdin=subprocess.PIPE
-            ),
-            subprocess.Popen(
-                f"python3 scripts/logger.py \
-                    '{FLAGS.summaries_dir}' \
-                    --port {FLAGS.tensorboard_port}",
-                shell=True,
-            ),
-        ]
+        if FLAGS.run_subprocesses:
+            processes = [
+                subprocess.Popen(
+                    "kill $(ps -A | grep tensorboard | grep -o '^[0-9]\\+')",
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stdin=subprocess.PIPE
+                ),
+                subprocess.Popen(
+                    f"python3 scripts/logger.py \
+                        '{FLAGS.summaries_dir}' \
+                        --port {FLAGS.tensorboard_port}",
+                    shell=True,
+                ),
+            ]
 
-        def kill_subprocesses():
-            for process in processes:
-                process.kill()
+            def kill_subprocesses():
+                for process in processes:
+                    process.kill()
 
-        atexit.register(kill_subprocesses)
-        print('goto: https://tensor.serveo.net to view logs')
+            atexit.register(kill_subprocesses)
+            print('goto: https://tensor.serveo.net to view logs')
 
 
 def define_flags(additional_flags=None):
