@@ -40,23 +40,20 @@ def cifar_input_fn(test=False):
 
 
 def large_image_input_fn(test=False):
-    if not FLAGS.local:
-        dataset = tf.data.TextLineDataset(f'{FLAGS.bucket}/image_locations.txt')
-    else:
+    if FLAGS.local:
         dataset = tf.data.Dataset.from_tensor_slices(
             tf.io.matching_files(f'{FLAGS.large_image_dir}/**/*jpg')
-        )
-        dataset = tf.data.TextLineDataset(f'{FLAGS.bucket}/image_locations.txt')
+        ).map(tf.io.read_file)
+    else:
+        dataset = tf.data.TFRecordDataset(FLAGS.record_data)
 
     if test:
         dataset = dataset.take(FLAGS.holdout_size)
     else:
         dataset = dataset.skip(FLAGS.holdout_size)
 
-    def parse_image(img_loc):
-        image_file = tf.io.read_file(img_loc)
-        image = tf.image.decode_jpeg(image_file, channels=3)
-        return image
+    def parse_image(image):
+        return tf.image.decode_jpeg(image, channels=3)
 
     def is_large_image(image):
         shape = tf.shape(image)[:2]
@@ -69,10 +66,9 @@ def large_image_input_fn(test=False):
         image = tf.dtypes.cast(image, tf.float32) / 255.0
         return image, image
 
-    return dataset.shuffle(10000).repeat(
-    ).map(parse_image).filter(is_large_image).map(reshape).batch(
-        FLAGS.batch_size
-    ).prefetch(4)
+    return dataset.repeat().map(parse_image).filter(
+        is_large_image,
+    ).map(reshape).batch(FLAGS.batch_size).prefetch(4)
 
 
 def unpickle(file):

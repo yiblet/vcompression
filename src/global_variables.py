@@ -215,6 +215,12 @@ def define_flags(additional_flags=None):
     default_debug = False
 
     parser.add_argument(
+        '-record_data',
+        default=f'{default_bucket}/test.tfrecord',
+        type=str,
+    )
+
+    parser.add_argument(
         '-data',
         default=default_data,
         type=str,
