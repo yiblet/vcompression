@@ -37,7 +37,7 @@ FLAGS = Namespace(is_set=False)
 
 
 def run_subprocesses():
-    if not FLAGS.local:
+    if (not FLAGS.local) and FLAGS.run_subprocesses:
         import atexit
 
         if 'COLAB_TPU_ADDR' in os.environ:
@@ -178,9 +178,18 @@ def define_flags(additional_flags=None):
     else:
         default_local = os.uname()[1] == 'XPS'
 
+    default_bucket = 'gs://yiblet_research'
+
     parser.add_argument(
         '-local',
         default=default_local,
+        type=bool,
+    )
+
+    parser.add_argument(
+        '-bucket',
+        default=default_bucket,
+        type=str,
     )
 
     if default_local:
@@ -194,12 +203,10 @@ def define_flags(additional_flags=None):
         print('mounting google drive')
         from google.colab import auth
         auth.authenticate_user()
-        from google.colab import drive
-        drive.mount('/gdrive')
 
         default_data = '/gdrive/My Drive/cifar10'
-        default_large_image_dir = 'gs://yiblet_research/images'
-        default_summaries_dir = 'gs://yiblet_research/summaries'
+        default_large_image_dir = f'{default_bucket}/images'
+        default_summaries_dir = f'{default_bucket}/summaries'
         default_tf_records_dir = default_data
         default_tpu_address = None
 
@@ -248,6 +255,12 @@ def define_flags(additional_flags=None):
         '-tpu_address',
         default=default_tpu_address,
         type=str,
+    )
+
+    parser.add_argument(
+        '-run_subprocesses',
+        default=False,
+        type=bool,
     )
 
     parser.parse_args(namespace=FLAGS)

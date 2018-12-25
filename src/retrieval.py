@@ -40,9 +40,10 @@ def cifar_input_fn(test=False):
 
 
 def large_image_input_fn(test=False):
-    dataset = tf.data.Dataset.from_tensor_slices(
-        tf.io.matching_files(f'{FLAGS.large_image_dir}/**/*jpg')
-    )
+    if not FLAGS.local:
+        dataset = tf.data.TextLineDataset('{FLAGS.bucket}/image_locations.txt')
+    else:
+        dataset = tf.io.matching_files(f'{FLAGS.large_image_dir}/**/*jpg')
 
     if test:
         dataset = dataset.take(FLAGS.holdout_size)
