@@ -41,7 +41,7 @@ def cifar_input_fn(test=False):
 
 def large_image_input_fn(test=False):
     if not FLAGS.local:
-        dataset = tf.data.TextLineDataset('{FLAGS.bucket}/image_locations.txt')
+        dataset = tf.data.TextLineDataset(f'{FLAGS.bucket}/image_locations.txt')
     else:
         dataset = tf.io.matching_files(f'{FLAGS.large_image_dir}/**/*jpg')
 
