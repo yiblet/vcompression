@@ -43,7 +43,10 @@ def large_image_input_fn(test=False):
     if not FLAGS.local:
         dataset = tf.data.TextLineDataset(f'{FLAGS.bucket}/image_locations.txt')
     else:
-        dataset = tf.io.matching_files(f'{FLAGS.large_image_dir}/**/*jpg')
+        dataset = tf.data.Dataset.from_tensor_slices(
+            tf.io.matching_files(f'{FLAGS.large_image_dir}/**/*jpg')
+        )
+        dataset = tf.data.TextLineDataset(f'{FLAGS.bucket}/image_locations.txt')
 
     if test:
         dataset = dataset.take(FLAGS.holdout_size)
@@ -97,3 +100,14 @@ def load_data():
     x_input = np.array(x_input).reshape([-1, *DIM])
     test_input = parse_cifar('test_batch')
     return (x_input, test_input)
+
+
+if __name__ == "__main__":
+    tf.enable_eager_execution()
+    define_flags()
+    import matplotlib.pyplot as plt
+    for image, _ in large_image_input_fn().take(10):
+        image = image.numpy()
+        image = image.reshape((32 * 16, 32, 3))
+        plt.imshow(image)
+        plt.show()

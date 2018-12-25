@@ -213,7 +213,8 @@ def main():
     clean_log_directories()
 
     train_writer = tf.summary.FileWriter(
-        f'{FLAGS.summaries_dir}/{FLAGS.train_dir}_{FLAGS.run_type}', sess.graph
+        f'{FLAGS.summaries_dir}/{FLAGS.train_dir}_{FLAGS.run_type}',
+        sess.graph,
     )
     test_writer = tf.summary.FileWriter(
         f'{FLAGS.summaries_dir}/{FLAGS.test_dir}_{FLAGS.run_type}',
