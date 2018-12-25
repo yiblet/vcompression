@@ -168,6 +168,12 @@ def define_flags(additional_flags=None):
         type=str,
     )
     parser.add_argument(
+        '-prefetch',
+        default=40,
+        type=int,
+        help='amount to be fetched in advance',
+    )
+    parser.add_argument(
         '-crop_size',
         default=32,
         type=str,
