@@ -19,53 +19,6 @@ import time
 tf.reset_default_graph()
 
 
-def make_latent_distribution_layer():
-    tfd = tfp.distributions
-    with summary.SummaryScope('latent_distributions') as scope:
-        categorical = tf.get_variable(
-            name='categorical_distribution',
-            shape=[FLAGS.categorical_dims],
-        )
-        categorical = tf.nn.softmax(categorical)
-        loc = tf.get_variable(
-            name='logistic_loc_variables',
-            shape=[FLAGS.categorical_dims],
-        )
-        scale = tf.nn.softplus(
-            tf.get_variable(
-                name='logistic_scale_variables',
-                shape=[FLAGS.categorical_dims],
-            )
-        )
-        scope['categorical'] = categorical
-        scope['loc'] = loc
-        scope['scale'] = scale
-
-        return tfd.MixtureSameFamily(
-            mixture_distribution=tfd.Categorical(probs=categorical),
-            components_distribution=tfd.Normal(
-                loc=loc,
-                scale=scale,
-            )
-        )
-
-
-def make_latent_likelihood_layer(latent):
-    tfd = tfp.distributions
-
-    distribution_layer = layers.LatentDistribution()
-
-    return (distribution_layer(latent), distribution_layer.distribution)
-
-
-def make_encoder_layer(data):
-    return layers.Encoder(FLAGS.channel_dims, FLAGS.hidden_dims)(data)
-
-
-def make_decoder_layer(code):
-    return layers.Decoder(FLAGS.channel_dims)(code)
-
-
 def log_sampling_information(latent, distribution):
     with summary.SummaryScope('samples') as scope:
         samples = tf.layers.flatten(latent)
@@ -89,55 +42,111 @@ def log_images_summary(data, latent, make_decoder):
     return tf.summary.image('comparison', image_comparison, max_outputs=10)
 
 
-def construct_vae(data, original_dim):
-    data, test = data
+class Compressor:
 
-    make_encoder = tf.make_template('encoder', make_encoder_layer)
-    make_decoder = tf.make_template('decoder', make_decoder_layer)
-    make_latent_likelihood = tf.make_template(
-        'latent_likelihood', make_latent_likelihood_layer
-    )
-    make_latent_distribution = tf.make_template(
-        'distribution', make_latent_distribution_layer
-    )
+    def __init__(self, data, original_dim):
+        self.data, self.test = data
+        self.original_dim = original_dim
+        self.build_reused_layers()
+        self.output, self.latents = self.build(self.data)
+        self.build_losses()
 
-    distribution = make_latent_distribution()
+    def build(self, input):
+        '''recursively builds residual autoencoder'''
+        shape = input.shape.as_list()[1:]
+        if shape[0] <= 16:    # TODO make this a flag
+            if FLAGS.debug:
+                print(f'input: {input.shape}')
+            # base case
+            latent = self.encoder(input)
+            if FLAGS.debug:
+                print(f'encoded: {latent.shape}')
+            latent = layers.Quantizer()(latent)
+            output = self.decoder(latent)
+            if FLAGS.debug:
+                print(f'decoded: {output.shape}')
+            return (output, [latent])
+        else:
+            # recursive case
+            pooled_input = tf.keras.layers.AvgPool2D()(input)
 
-    # Define the model.
-    latent = make_encoder(data)    # (batch, z_dims, hidden_depth)
-    latent = layers.Quantizer()(latent)
-    x_tilde = make_decoder(latent)
-    num_pixels = np.prod(original_dim[:2])
+            if FLAGS.debug:
+                print(f'downsample: {pooled_input.shape}')
 
-    stopped_latents = tf.stop_gradient(latent)
-    likelihoods = distribution.cdf(
-        tf.clip_by_value(stopped_latents + 0.5 / 255.0, 0.0, 1.0)
-    ) - distribution.cdf(
-        tf.clip_by_value(stopped_latents - 0.5 / 255.0, 0.0, 1.0)
-    )
+            pooled_output, latents = self.build(pooled_input)
+            predicted_output = self.upsampler(pooled_output)
+            if FLAGS.debug:
+                print(f'upsample: {predicted_output.shape}')
 
-    log_sampling_information(latent, distribution)
+            residual = input - predicted_output
+            latent = self.encoder(residual)
+            if FLAGS.debug:
+                print(f'encoded: {latent.shape}')
+            latent = layers.Quantizer()(latent)
+            latents.append(latent)
+            output = self.decoder(latent) + predicted_output
+            if FLAGS.debug:
+                print(f'decoded: {output.shape}')
+            return (output, latents)
 
-    with summary.SummaryScope('losses') as scope:
-        bpp_flattened = tf.layers.flatten(tf.log(likelihoods))
-        train_bpp = tf.reduce_mean(tf.reduce_sum(bpp_flattened, axis=[1]))
-        train_bpp /= -np.log(2) * num_pixels
-        train_mse = tf.reduce_mean(tf.squared_difference(test, x_tilde))
-        train_mse *= 255**2 / num_pixels
-        train_loss = train_mse * 0.05 + train_bpp
-        scope['likelihoods'] = likelihoods
-        scope['bpp'] = train_bpp
-        scope['mse'] = train_mse
-        scope['loss'] = train_loss
+    def build_reused_layers(self):
+        self.encoder = layers.Encoder(FLAGS.channel_dims, FLAGS.hidden_dims)
+        self.decoder = layers.Decoder(FLAGS.channel_dims)
+        self.likelihoods = layers.LatentDistribution()
+        self.distribution = self.likelihoods.distribution
+        self.upsampler = tf.layers.Conv2DTranspose(
+            3,
+            [2, 2],
+            [2, 2],
+            name='upsampler',
+            activation='relu',
+        )
 
-    train_op = tf.train.AdamOptimizer(FLAGS.learning_rate) \
-        .minimize(train_loss)
+    def build_losses(self):
+        num_pixels = np.prod(self.original_dim[:2])
 
-    merged = tf.summary.merge_all()
+        with summary.SummaryScope('losses') as scope:
 
-    images_summary = log_images_summary(data, latent, make_decoder)
+            expected_bits_per_image = tf.reduce_sum(
+                [
+                    tf.reduce_sum(
+                        tf.log(self.likelihoods(latent)), axis=[1, 2, 3]
+                    ) for latent in self.latents
+                ],
+                axis=[0],
+            )
+            train_bpp = tf.reduce_mean(expected_bits_per_image)
+            train_bpp /= -np.log(2) * num_pixels
+            train_mse = tf.reduce_mean(
+                tf.squared_difference(self.test, self.output)
+            )
+            train_mse *= 255**2 / num_pixels
+            train_loss = train_mse * 0.05 + train_bpp
+            scope['bpp'] = train_bpp
+            scope['mse'] = train_mse
+            scope['loss'] = train_loss
 
-    return (data, train_loss, latent, train_op, merged, images_summary)
+        train_op = tf.train.AdamOptimizer(FLAGS.learning_rate) \
+            .minimize(train_loss)
+
+        merged = tf.summary.merge_all()
+
+        images_summary = log_images_summary(
+            self.data, self.latents[-1], self.decoder
+        )
+
+        self.train_loss = train_loss
+        self.train_op = train_op
+        self.merged = merged
+        self.images_summary = images_summary
+
+    def tensors(self):
+        return (
+            self.train_loss,
+            self.train_op,
+            self.merged,
+            self.images_summary,
+        )
 
 
 def clean_log_directories():
@@ -196,10 +205,10 @@ def main():
     print('--------------')
 
     use_train_data, data = dataset_queue()
-    (x_input, elbo, code, optimize, merged, images) = construct_vae(
+    elbo, optimize, merged, images = Compressor(
         data,
         original_dim=DIM,
-    )
+    ).tensors()
 
     print_params()
 

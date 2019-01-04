@@ -59,25 +59,25 @@ class SummaryScope(dict):
     def sequential(self, input, ops, include_input=False):
         prev_op = input
 
-        if FLAGS.debug:
+        if FLAGS.debug >= 2:
             print(f'printing {self.scope_name} dimensions')
 
         if include_input:
             name = self._get_name(prev_op.name)
-            if FLAGS.debug:
+            if FLAGS.debug >= 2:
                 print(f'{name}: {prev_op.shape}')
             self[name] = prev_op
 
         for operation in ops:
             prev_op = operation(prev_op)
             name = self._get_name(prev_op.name)
-            if FLAGS.debug:
+            if FLAGS.debug >= 2:
                 print(f'{name}: {prev_op.shape}')
             self[name] = prev_op
 
         self.is_sequential = True
 
-        if FLAGS.debug:
+        if FLAGS.debug >= 2:
             print('')
 
         return prev_op
@@ -90,7 +90,7 @@ class SummaryScope(dict):
     def __exit__(self, type, value, traceback):
         self.scope.__exit__(type, value, traceback)
 
-        if (not self.is_sequential) and FLAGS.debug:
+        if (not self.is_sequential) and FLAGS.debug >= 2:
             print(f'printing {self.scope_name} dimensions')
             for k, v in self.items():
                 print(f'{k}: {v.shape}')

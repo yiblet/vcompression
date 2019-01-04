@@ -219,7 +219,7 @@ def define_flags(additional_flags=None):
 
     # defaults that are the same for both types
     default_directory = 'out'
-    default_debug = False
+    default_debug = 0
 
     parser.add_argument(
         '-record_data',
@@ -236,7 +236,7 @@ def define_flags(additional_flags=None):
     parser.add_argument(
         '-debug',
         default=default_debug,
-        type=bool,
+        type=int,
     )
 
     parser.add_argument(
