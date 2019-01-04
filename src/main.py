@@ -97,8 +97,10 @@ class Compressor:
         return (output, latents, images)
 
     def build_reused_layers(self):
-        self.encoder = layers.Encoder(FLAGS.channel_dims, FLAGS.hidden_dims)
-        self.decoder = layers.Decoder(FLAGS.channel_dims)
+        self.encoder = layers.Encoder(
+            FLAGS.channel_dims, FLAGS.hidden_dims, activation='tanh'
+        )
+        self.decoder = layers.Decoder(FLAGS.channel_dims, activation='tanh')
         self.likelihoods = layers.LatentDistribution()
         self.distribution = self.likelihoods.distribution
         self.upsampler = tf.layers.Conv2DTranspose(
@@ -106,7 +108,7 @@ class Compressor:
             [2, 2],
             [2, 2],
             name='upsampler',
-            activation='relu',
+            activation='tanh',
         )
 
     def build_losses(self):

@@ -263,7 +263,8 @@ class Decoder(SummaryModel):
                 [2, 2],
                 name='deconv_2',
                 activation=None,
-            ), self.activation,
+            ),
+            self.activation,
             ResidualBlock(
                 self.channels, kernel=[3, 3], activation=self.activation
             ),
@@ -273,7 +274,8 @@ class Decoder(SummaryModel):
                 [2, 2],
                 name='deconv_3',
                 activation=None,
-            ), self.activation,
+            ),
+            self.activation,
             ResidualBlock(
                 self.channels, kernel=[3, 3], activation=self.activation
             ),
@@ -283,7 +285,8 @@ class Decoder(SummaryModel):
                 [2, 2],
                 name='deconv_4',
                 activation=None,
-            ), self.activation,
+            ),
+            self.activation,
             ResidualBlock(
                 self.channels, kernel=[3, 3], activation=self.activation
             ),
@@ -294,7 +297,7 @@ class Decoder(SummaryModel):
                 name='deconv_5',
                 activation=None,
             ),
-            tf.keras.layers.Activation('relu', name='relu_5'),
+            self.activation,
             tf.layers.Conv2DTranspose(
                 3,
                 [1, 1],
@@ -302,6 +305,6 @@ class Decoder(SummaryModel):
                 name='deconv_6',
                 activation=None,
             ),
-            tf.keras.layers.Activation('relu', name='relu_6')
+            self.activation,
         ]
         super().build(input_shape)
