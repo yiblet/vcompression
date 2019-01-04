@@ -28,44 +28,31 @@ def log_sampling_information(latent, distribution):
         )
 
 
-def log_images_summary(data, latent, make_decoder):
-    random_sub_batch_dims = tf.random_uniform(
-        [10],
-        minval=0,
-        maxval=tf.shape(data, out_type=tf.int32)[0],
-        dtype=tf.int32,
-    )
-    latent_random_sub_batch = tf.gather(latent, random_sub_batch_dims)
-    data_random_sub_batch = tf.gather(data, random_sub_batch_dims)
-    generated = make_decoder(latent_random_sub_batch)
-    image_comparison = tf.concat([data_random_sub_batch, generated], 2)
-    return tf.summary.image('comparison', image_comparison, max_outputs=10)
-
-
 class Compressor:
 
     def __init__(self, data, original_dim):
         self.data, self.test = data
         self.original_dim = original_dim
+        self.image_summary_idx = tf.random_uniform(
+            [10],
+            minval=0,
+            maxval=tf.shape(data, out_type=tf.int32)[0],
+            dtype=tf.int32,
+        )
         self.build_reused_layers()
-        self.output, self.latents = self.build(self.data)
+        self.output, self.latents, self.images = self.build(self.data)
         self.build_losses()
 
     def build(self, input):
         '''recursively builds residual autoencoder'''
         shape = input.shape.as_list()[1:]
         if shape[0] <= 16:    # TODO make this a flag
+            latents = []
+            images = []
+            residual = input
+            predicted_output = tf.zeros_like(input)
             if FLAGS.debug:
-                print(f'input: {input.shape}')
-            # base case
-            latent = self.encoder(input)
-            if FLAGS.debug:
-                print(f'encoded: {latent.shape}')
-            latent = layers.Quantizer()(latent)
-            output = self.decoder(latent)
-            if FLAGS.debug:
-                print(f'decoded: {output.shape}')
-            return (output, [latent])
+                print(f'input: {residual.shape}')
         else:
             # recursive case
             pooled_input = tf.keras.layers.AvgPool2D()(input)
@@ -73,21 +60,41 @@ class Compressor:
             if FLAGS.debug:
                 print(f'downsample: {pooled_input.shape}')
 
-            pooled_output, latents = self.build(pooled_input)
+            pooled_output, latents, images = self.build(pooled_input)
             predicted_output = self.upsampler(pooled_output)
             if FLAGS.debug:
                 print(f'upsample: {predicted_output.shape}')
-
             residual = input - predicted_output
-            latent = self.encoder(residual)
-            if FLAGS.debug:
-                print(f'encoded: {latent.shape}')
-            latent = layers.Quantizer()(latent)
-            latents.append(latent)
-            output = self.decoder(latent) + predicted_output
-            if FLAGS.debug:
-                print(f'decoded: {output.shape}')
-            return (output, latents)
+
+        latent = self.encoder(residual)
+        if FLAGS.debug:
+            print(f'encoded: {latent.shape}')
+        latent = layers.Quantizer()(latent)
+        latents.append(latent)
+
+        decoded = self.decoder(latent)
+
+        if shape[0] <= 16:    # TODO make this a flag
+            output = decoded
+        else:
+            output = decoded + predicted_output
+
+        images.append(
+            tf.concat(
+                [
+                    tf.gather(input, self.image_summary_idx),
+                    tf.gather(predicted_output, self.image_summary_idx),
+                    tf.gather(residual, self.image_summary_idx),
+                    tf.gather(decoded, self.image_summary_idx),
+                    tf.gather(output, self.image_summary_idx),
+                ],
+                axis=2,
+            )
+        )
+
+        if FLAGS.debug:
+            print(f'decoded: {output.shape}')
+        return (output, latents, images)
 
     def build_reused_layers(self):
         self.encoder = layers.Encoder(FLAGS.channel_dims, FLAGS.hidden_dims)
@@ -131,9 +138,10 @@ class Compressor:
 
         merged = tf.summary.merge_all()
 
-        images_summary = log_images_summary(
-            self.data, self.latents[-1], self.decoder
-        )
+        images_summary = tf.summary.merge([
+            tf.summary.image(f'comparison_{idx}', image, max_outputs=10)
+            for idx, image in enumerate(self.images)
+        ])
 
         self.train_loss = train_loss
         self.train_op = train_op
