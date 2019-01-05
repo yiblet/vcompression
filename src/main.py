@@ -121,14 +121,21 @@ class Compressor:
             FLAGS.channel_dims,
             FLAGS.hidden_dims,
         )
-        self.decoder = layers.Decoder(FLAGS.channel_dims,)
-        self.likelihoods = layers.LatentDistribution()
+        self.decoder = tf.make_template(
+            'decoder', layers.Decoder(FLAGS.channel_dims,)
+        )
+        self.likelihoods = tf.make_template(
+            'likelihoods', layers.LatentDistribution()
+        )
         self.distribution = self.likelihoods.distribution
-        self.upsampler = tf.layers.Conv2DTranspose(
-            3,
-            [2, 2],
-            [2, 2],
-            name='upsampler',
+        self.upsampler = tf.make_template(
+            'upsampler',
+            tf.layers.Conv2DTranspose(
+                3,
+                [2, 2],
+                [2, 2],
+                name='upsampler',
+            )
         )
 
     def build_losses(self):
@@ -242,12 +249,11 @@ def main():
 
     crop_size, use_train_data, initializers, data = dataset_queue()
 
-    with tf.variable_scope('compressor', reuse=True):
-        compressor = Compressor(
-            data,
-            original_dim=(current_size, current_size, 3),
-        )
-        elbo, optimize, merged, images = compressor.tensors()
+    compressor = Compressor(
+        data,
+        original_dim=(current_size, current_size, 3),
+    )
+    elbo, optimize, merged, images = compressor.tensors()
 
     print_params()
 
@@ -285,19 +291,18 @@ def main():
         for epoch in range(FLAGS.epochs):
             start_time = time.time()
             if epoch == FLAGS.resize_to_32:
-                with tf.variable_scope('compressor', reuse=True):
-                    current_size = 32
-                    compressor.new_original_dim((
-                        current_size,
-                        current_size,
-                        3,
-                    ))
-                    elbo, optimize, merged, images = compressor.tensors()
-                    initialize_uninitialized(sess)
-                    sess.run(
-                        initializers,
-                        {crop_size: current_size},
-                    )
+                current_size = 32
+                compressor.new_original_dim((
+                    current_size,
+                    current_size,
+                    3,
+                ))
+                elbo, optimize, merged, images = compressor.tensors()
+                initialize_uninitialized(sess)
+                sess.run(
+                    initializers,
+                    {crop_size: current_size},
+                )
 
             feed = {
                 use_train_data: False,
