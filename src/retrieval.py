@@ -41,7 +41,7 @@ def cifar_input_fn(test=False):
 
 def large_image_input_fn(test=False, crop_size=None):
     if crop_size is None:
-        crop_size = FLAGS.crop_size
+        return ValueError('crop_size must not be None')
 
     if FLAGS.local:
         dataset = tf.data.Dataset.from_tensor_slices(

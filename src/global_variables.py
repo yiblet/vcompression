@@ -75,6 +75,13 @@ def run_subprocesses():
             print('goto: https://tensor.serveo.net to view logs')
 
 
+def int_or_none(value):
+    if value is None:
+        return None
+    else:
+        return int(value)
+
+
 def define_flags(additional_flags=None):
     reset = False    # @param {type: "boolean"}
     if (not reset) and FLAGS.is_set:
@@ -175,10 +182,17 @@ def define_flags(additional_flags=None):
         help='amount to be fetched in advance',
     )
     parser.add_argument(
-        '-resize_to_32',
-        default=20,
+        '-increment_size_intervals',
+        nargs='*',
+        default=[20, 50, 100],
         type=int,
-        help='epoch at which the model resizes to 32',
+        help='epoch at which the model doubles in size',
+    )
+    parser.add_argument(
+        '-fixed_size',
+        default=None,
+        type=int_or_none,
+        help='fixed crop size',
     )
     parser.add_argument(
         '-crop_size',

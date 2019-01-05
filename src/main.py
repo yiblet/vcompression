@@ -80,7 +80,7 @@ class Compressor:
             if FLAGS.debug >= 1:
                 print(f'downsample: {pooled_input.shape}')
 
-            pooled_output, latents, images = self.build(pooled_input, size / 4)
+            pooled_output, latents, images = self.build(pooled_input, size / 2)
             predicted_output = self.upsampler(pooled_output)
             if FLAGS.debug >= 1:
                 print(f'upsample: {predicted_output.shape}')
@@ -132,7 +132,7 @@ class Compressor:
         self.distribution = likelihoods.distribution
         self.upsampler = tf.make_template(
             'upsampler',
-            lambda image: tf.image.resize_bilinear(image, [32, 32])
+            lambda image: tf.image.resize_bilinear(image, [image.shape[1] * 2, image.shape[1] * 2])
         )
 
     def build_losses(self):
@@ -244,9 +244,14 @@ def main():
     pprint.pprint(FLAGS.__dict__)
     print('--------------')
 
-    current_size = 32
+    if FLAGS.fixed_size is None:
+        current_size = 16
+    else:
+        current_size = FLAGS.fixed_size
 
-    crop_size, use_train_data, initializers, data = dataset_queue()
+    crop_size, use_train_data, initializers, data = dataset_queue(
+        crop_size=FLAGS.fixed_size
+    )
 
     compressor = Compressor(
         data,
@@ -288,10 +293,19 @@ def main():
 
         print('Running ops')
 
+        resize_times = {
+            size: 2**(i + 5)
+            for i, size in enumerate(FLAGS.increment_size_intervals)
+        }
+
+        pprint.pprint(resize_times)
+
         for epoch in range(FLAGS.epochs):
             start_time = time.time()
-            if epoch == FLAGS.resize_to_32 and isinstance(crop_size, tf.Tensor):
-                current_size = 32
+            if epoch in resize_times and isinstance(crop_size, tf.Tensor):
+                current_size = resize[epoch]
+                if FLAGS.debug >= 1:
+                    print(f'incrementing to: {current_size}')
                 compressor.new_original_dim((
                     current_size,
                     current_size,
@@ -338,10 +352,12 @@ def main():
                         trace_level=tf.RunOptions.FULL_TRACE
                     )
                     run_metadata = tf.RunMetadata()
-                    train_elbo, _, summary = sess.run([elbo, optimize, merged],
-                                                      feed,
-                                                      options=run_options,
-                                                      run_metadata=run_metadata)
+                    train_elbo, _, summary = sess.run(
+                        [elbo, optimize, merged],
+                        feed,
+                        options=run_options,
+                        run_metadata=run_metadata,
+                    )
                     train_writer.add_summary(summary, global_step)
                     train_writer.add_run_metadata(
                         run_metadata,
