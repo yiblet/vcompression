@@ -117,9 +117,11 @@ class Compressor:
         return (output, latents, images)
 
     def build_reused_layers(self):
-        self.encoder = layers.Encoder(
-            FLAGS.channel_dims,
-            FLAGS.hidden_dims,
+        self.encoder = tf.make_template(
+            'encoder', layers.Encoder(
+                FLAGS.channel_dims,
+                FLAGS.hidden_dims,
+            )
         )
         self.decoder = tf.make_template(
             'decoder', layers.Decoder(FLAGS.channel_dims,)
