@@ -61,7 +61,6 @@ class Compressor:
         self.output, self.latents, self.images = self.build(
             self.data, original_dim[0]
         )
-        self.upsampler(self.output)
         self.build_losses()
 
     def build(self, input, size):
@@ -81,7 +80,9 @@ class Compressor:
                 print(f'downsample: {pooled_input.shape}')
 
             pooled_output, latents, images = self.build(pooled_input, size / 2)
-            predicted_output = self.upsampler(pooled_output)
+            predicted_output = tf.image.resize_bilinear(
+                pooled_output, [size, size]
+            )
             if FLAGS.debug >= 1:
                 print(f'upsample: {predicted_output.shape}')
             residual = input - predicted_output
@@ -130,10 +131,6 @@ class Compressor:
         likelihoods = layers.LatentDistribution()
         self.likelihoods = tf.make_template('likelihoods', likelihoods)
         self.distribution = likelihoods.distribution
-        self.upsampler = tf.make_template(
-            'upsampler',
-            lambda image: tf.image.resize_bilinear(image, [image.shape[1] * 2, image.shape[1] * 2])
-        )
 
     def build_losses(self):
         num_pixels = np.prod(self.original_dim[:2])
@@ -303,7 +300,7 @@ def main():
         for epoch in range(FLAGS.epochs):
             start_time = time.time()
             if epoch in resize_times and isinstance(crop_size, tf.Tensor):
-                current_size = resize[epoch]
+                current_size = resize_times[epoch]
                 if FLAGS.debug >= 1:
                     print(f'incrementing to: {current_size}')
                 compressor.new_original_dim((
