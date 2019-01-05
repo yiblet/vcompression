@@ -305,6 +305,5 @@ class Decoder(SummaryModel):
                 name='deconv_6',
                 activation=None,
             ),
-            self.activation,
         ]
         super().build(input_shape)

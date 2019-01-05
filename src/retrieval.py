@@ -39,7 +39,10 @@ def cifar_input_fn(test=False):
     return dataset
 
 
-def large_image_input_fn(test=False):
+def large_image_input_fn(test=False, crop_size=None):
+    if crop_size is None:
+        crop_size = FLAGS.crop_size
+
     if FLAGS.local:
         dataset = tf.data.Dataset.from_tensor_slices(
             tf.io.matching_files(f'{FLAGS.large_image_dir}/**/*jpg')
@@ -57,12 +60,10 @@ def large_image_input_fn(test=False):
 
     def is_large_image(image):
         shape = tf.shape(image)[:2]
-        return tf.reduce_all(shape >= FLAGS.crop_size)
+        return tf.reduce_all(shape >= crop_size)
 
     def reshape(image):
-        image = tf.image.random_crop(
-            image, [FLAGS.crop_size, FLAGS.crop_size, 3]
-        )
+        image = tf.image.random_crop(image, [crop_size, crop_size, 3])
         image = tf.dtypes.cast(image, tf.float32) / 255.0
         return image, image
 

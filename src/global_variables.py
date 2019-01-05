@@ -175,6 +175,12 @@ def define_flags(additional_flags=None):
         help='amount to be fetched in advance',
     )
     parser.add_argument(
+        '-resize_to_32',
+        default=20,
+        type=int,
+        help='epoch at which the model resizes to 32',
+    )
+    parser.add_argument(
         '-crop_size',
         default=32,
         type=str,

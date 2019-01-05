@@ -28,11 +28,25 @@ def log_sampling_information(latent, distribution):
         )
 
 
+def initialize_uninitialized(sess):
+    global_vars = tf.global_variables()
+    is_not_initialized = sess.run([
+        tf.is_variable_initialized(var) for var in global_vars
+    ])
+    not_initialized_vars = [
+        v for (v, f) in zip(global_vars, is_not_initialized) if not f
+    ]
+
+    if len(not_initialized_vars):
+        if FLAGS.debug:
+            print(f'initializing: {[(i.name) for i in not_initialized_vars]}')
+        sess.run(tf.variables_initializer(not_initialized_vars))
+
+
 class Compressor:
 
     def __init__(self, data, original_dim):
         self.data, self.test = data
-        self.original_dim = original_dim
         self.image_summary_idx = tf.random_uniform(
             [10],
             minval=0,
@@ -40,13 +54,19 @@ class Compressor:
             dtype=tf.int32,
         )
         self.build_reused_layers()
-        self.output, self.latents, self.images = self.build(self.data)
+        self.new_original_dim(original_dim)
+
+    def new_original_dim(self, original_dim):
+        self.original_dim = original_dim
+        self.output, self.latents, self.images = self.build(
+            self.data, original_dim[0]
+        )
+        self.upsampler(self.output)
         self.build_losses()
 
-    def build(self, input):
+    def build(self, input, size):
         '''recursively builds residual autoencoder'''
-        shape = input.shape.as_list()[1:]
-        if shape[0] <= 16:    # TODO make this a flag
+        if size <= 16:    # TODO make this a flag
             latents = []
             images = []
             residual = input
@@ -60,7 +80,7 @@ class Compressor:
             if FLAGS.debug:
                 print(f'downsample: {pooled_input.shape}')
 
-            pooled_output, latents, images = self.build(pooled_input)
+            pooled_output, latents, images = self.build(pooled_input, size / 4)
             predicted_output = self.upsampler(pooled_output)
             if FLAGS.debug:
                 print(f'upsample: {predicted_output.shape}')
@@ -74,10 +94,10 @@ class Compressor:
 
         decoded = self.decoder(latent)
 
-        if shape[0] <= 16:    # TODO make this a flag
-            output = decoded
+        if size <= 16:    # TODO make this a flag
+            output = tf.nn.relu(decoded)
         else:
-            output = decoded + predicted_output
+            output = tf.nn.relu(decoded + predicted_output)
 
         images.append(
             tf.concat(
@@ -98,9 +118,10 @@ class Compressor:
 
     def build_reused_layers(self):
         self.encoder = layers.Encoder(
-            FLAGS.channel_dims, FLAGS.hidden_dims, activation='tanh'
+            FLAGS.channel_dims,
+            FLAGS.hidden_dims,
         )
-        self.decoder = layers.Decoder(FLAGS.channel_dims, activation='tanh')
+        self.decoder = layers.Decoder(FLAGS.channel_dims,)
         self.likelihoods = layers.LatentDistribution()
         self.distribution = self.likelihoods.distribution
         self.upsampler = tf.layers.Conv2DTranspose(
@@ -108,7 +129,6 @@ class Compressor:
             [2, 2],
             [2, 2],
             name='upsampler',
-            activation='tanh',
         )
 
     def build_losses(self):
@@ -194,17 +214,20 @@ def print_params():
 
 def dataset_queue(input_fn=retrieval.large_image_input_fn):
 
-    train_data = input_fn()
-    test_data = input_fn(test=True)
+    crop_size = tf.placeholder(tf.int32, name='crop_size')
+    train_data = input_fn(crop_size=crop_size)
+    test_data = input_fn(test=True, crop_size=crop_size)
 
-    train_iter = train_data.make_one_shot_iterator()
+    train_iter = train_data.make_initializable_iterator()
     train_next = train_iter.get_next()
-    test_iter = test_data.make_one_shot_iterator()
+    test_iter = test_data.make_initializable_iterator()
     test_next = test_iter.get_next()
 
     use_train_data = tf.placeholder(tf.bool)
     return (
+        crop_size,
         use_train_data,
+        [train_iter.initializer, test_iter.initializer],
         tf.cond(use_train_data, lambda: train_next, lambda: test_next),
     )
 
@@ -214,11 +237,14 @@ def main():
     pprint.pprint(FLAGS.__dict__)
     print('--------------')
 
-    use_train_data, data = dataset_queue()
-    elbo, optimize, merged, images = Compressor(
+    current_size = 16
+
+    crop_size, use_train_data, initializers, data = dataset_queue()
+    compressor = Compressor(
         data,
-        original_dim=DIM,
-    ).tensors()
+        original_dim=(current_size, current_size, 3),
+    )
+    elbo, optimize, merged, images = compressor.tensors()
 
     print_params()
 
@@ -241,7 +267,11 @@ def main():
     print(f"logging at {FLAGS.summaries_dir}")
 
     try:
-        sess.run(tf.global_variables_initializer())
+        print('globally initializing')
+        sess.run(
+            [tf.global_variables_initializer(), *initializers],
+            {crop_size: current_size},
+        )
 
         if FLAGS.tpu_address is not None:
             print('Initializing TPUs...')
@@ -251,9 +281,19 @@ def main():
 
         for epoch in range(FLAGS.epochs):
             start_time = time.time()
+            if epoch == FLAGS.resize_to_32:
+                current_size = 32
+                compressor.new_original_dim((current_size, current_size, 3))
+                elbo, optimize, merged, images = compressor.tensors()
+                initialize_uninitialized(sess)
+                sess.run(
+                    initializers,
+                    {crop_size: current_size},
+                )
 
             feed = {
                 use_train_data: False,
+                crop_size: current_size,
             }
 
             test_elbo, summary, images_summary = sess.run([
@@ -266,6 +306,7 @@ def main():
             for train_step in range(FLAGS.train_steps):
                 feed = {
                     use_train_data: True,
+                    crop_size: current_size,
                 }
 
                 global_step = FLAGS.train_steps * epoch + train_step
