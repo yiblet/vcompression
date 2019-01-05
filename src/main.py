@@ -139,7 +139,8 @@ class Compressor:
             expected_bits_per_image = tf.reduce_sum(
                 [
                     tf.reduce_sum(
-                        tf.log(self.likelihoods(latent)), axis=[1, 2, 3]
+                        tf.log(self.likelihoods(latent) + 1e-12),
+                        axis=[1, 2, 3]
                     ) for latent in self.latents
                 ],
                 axis=[0],
@@ -240,11 +241,13 @@ def main():
     current_size = 16
 
     crop_size, use_train_data, initializers, data = dataset_queue()
-    compressor = Compressor(
-        data,
-        original_dim=(current_size, current_size, 3),
-    )
-    elbo, optimize, merged, images = compressor.tensors()
+
+    with tf.variable_scope('compressor', reuse=True):
+        compressor = Compressor(
+            data,
+            original_dim=(current_size, current_size, 3),
+        )
+        elbo, optimize, merged, images = compressor.tensors()
 
     print_params()
 
@@ -282,14 +285,19 @@ def main():
         for epoch in range(FLAGS.epochs):
             start_time = time.time()
             if epoch == FLAGS.resize_to_32:
-                current_size = 32
-                compressor.new_original_dim((current_size, current_size, 3))
-                elbo, optimize, merged, images = compressor.tensors()
-                initialize_uninitialized(sess)
-                sess.run(
-                    initializers,
-                    {crop_size: current_size},
-                )
+                with tf.variable_scope('compressor', reuse=True):
+                    current_size = 32
+                    compressor.new_original_dim((
+                        current_size,
+                        current_size,
+                        3,
+                    ))
+                    elbo, optimize, merged, images = compressor.tensors()
+                    initialize_uninitialized(sess)
+                    sess.run(
+                        initializers,
+                        {crop_size: current_size},
+                    )
 
             feed = {
                 use_train_data: False,
