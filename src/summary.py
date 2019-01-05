@@ -32,7 +32,7 @@ class Summarize(tf.keras.layers.Layer):
     def call(self, input):
         variable_summaries(self.key, input)
 
-        if FLAGS.debug:
+        if FLAGS.debug >= 1:
             print(f'{self.key}: {input.shape}')
 
         return input

@@ -38,7 +38,7 @@ def initialize_uninitialized(sess):
     ]
 
     if len(not_initialized_vars):
-        if FLAGS.debug:
+        if FLAGS.debug >= 1:
             print(f'initializing: {[(i.name) for i in not_initialized_vars]}')
         sess.run(tf.variables_initializer(not_initialized_vars))
 
@@ -71,23 +71,23 @@ class Compressor:
             images = []
             residual = input
             predicted_output = tf.zeros_like(input)
-            if FLAGS.debug:
+            if FLAGS.debug >= 1:
                 print(f'input: {residual.shape}')
         else:
             # recursive case
             pooled_input = tf.keras.layers.AvgPool2D()(input)
 
-            if FLAGS.debug:
+            if FLAGS.debug >= 1:
                 print(f'downsample: {pooled_input.shape}')
 
             pooled_output, latents, images = self.build(pooled_input, size / 4)
             predicted_output = self.upsampler(pooled_output)
-            if FLAGS.debug:
+            if FLAGS.debug >= 1:
                 print(f'upsample: {predicted_output.shape}')
             residual = input - predicted_output
 
         latent = self.encoder(residual)
-        if FLAGS.debug:
+        if FLAGS.debug >= 1:
             print(f'encoded: {latent.shape}')
         latent = layers.Quantizer()(latent)
         latents.append(latent)
@@ -112,7 +112,7 @@ class Compressor:
             )
         )
 
-        if FLAGS.debug:
+        if FLAGS.debug >= 1:
             print(f'decoded: {output.shape}')
         return (output, latents, images)
 
@@ -124,7 +124,7 @@ class Compressor:
             )
         )
         self.decoder = tf.make_template(
-            'decoder', layers.Decoder(FLAGS.channel_dims,)
+            'decoder', layers.Decoder(FLAGS.channel_dims)
         )
 
         likelihoods = layers.LatentDistribution()
@@ -132,12 +132,7 @@ class Compressor:
         self.distribution = likelihoods.distribution
         self.upsampler = tf.make_template(
             'upsampler',
-            tf.layers.Conv2DTranspose(
-                3,
-                [2, 2],
-                [2, 2],
-                name='upsampler',
-            )
+            lambda image: tf.image.resize_bilinear(image, [32, 32])
         )
 
     def build_losses(self):
@@ -208,7 +203,8 @@ def print_params():
     print(f'number of parameters in vae: {total_count}')
 
     params = {
-        scope: util.count_parameters(scope) for scope in ['encoder', 'decoder']
+        scope: util.count_parameters(scope)
+        for scope in ['encoder', 'decoder', 'upsampler']
     }
 
     params['auxiliary nodes'] = total_count - sum(
@@ -222,9 +218,10 @@ def print_params():
     print('---------------')
 
 
-def dataset_queue(input_fn=retrieval.large_image_input_fn):
+def dataset_queue(input_fn=retrieval.large_image_input_fn, crop_size=None):
+    if crop_size is None:
+        crop_size = tf.placeholder(tf.int32, name='crop_size')
 
-    crop_size = tf.placeholder(tf.int32, name='crop_size')
     train_data = input_fn(crop_size=crop_size)
     test_data = input_fn(test=True, crop_size=crop_size)
 
@@ -247,7 +244,7 @@ def main():
     pprint.pprint(FLAGS.__dict__)
     print('--------------')
 
-    current_size = 16
+    current_size = 32
 
     crop_size, use_train_data, initializers, data = dataset_queue()
 
@@ -279,10 +276,11 @@ def main():
 
     try:
         print('globally initializing')
-        sess.run(
-            [tf.global_variables_initializer(), *initializers],
-            {crop_size: current_size},
-        )
+        if isinstance(crop_size, tf.Tensor):
+            feed = {crop_size: current_size}
+        else:
+            feed = {}
+        sess.run([tf.global_variables_initializer(), *initializers], feed)
 
         if FLAGS.tpu_address is not None:
             print('Initializing TPUs...')
@@ -292,7 +290,7 @@ def main():
 
         for epoch in range(FLAGS.epochs):
             start_time = time.time()
-            if epoch == FLAGS.resize_to_32:
+            if epoch == FLAGS.resize_to_32 and isinstance(crop_size, tf.Tensor):
                 current_size = 32
                 compressor.new_original_dim((
                     current_size,
@@ -306,10 +304,15 @@ def main():
                     {crop_size: current_size},
                 )
 
-            feed = {
-                use_train_data: False,
-                crop_size: current_size,
-            }
+            if isinstance(crop_size, tf.Tensor):
+                feed = {
+                    use_train_data: False,
+                    crop_size: current_size,
+                }
+            else:
+                feed = {
+                    use_train_data: False,
+                }
 
             test_elbo, summary, images_summary = sess.run([
                 elbo, merged, images
@@ -319,10 +322,15 @@ def main():
 
             # training step
             for train_step in range(FLAGS.train_steps):
-                feed = {
-                    use_train_data: True,
-                    crop_size: current_size,
-                }
+                if isinstance(crop_size, tf.Tensor):
+                    feed = {
+                        use_train_data: True,
+                        crop_size: current_size,
+                    }
+                else:
+                    feed = {
+                        use_train_data: True,
+                    }
 
                 global_step = FLAGS.train_steps * epoch + train_step
                 if global_step == 0:

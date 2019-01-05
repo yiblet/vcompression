@@ -307,3 +307,43 @@ class Decoder(SummaryModel):
             ),
         ]
         super().build(input_shape)
+
+
+class Upsampler(SummaryModel):
+
+    def __init__(
+        self,
+        channels,
+        activation='relu',
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.channels = channels
+        if activation == 'relu':
+            self.activation = tf.keras.layers.Activation('relu')
+        elif activation == 'tanh':
+            self.activation = tf.keras.layers.Activation('tanh')
+        else:
+            raise ValueError('unsupported activation')
+        self.build(None)
+
+    def build(self, input_shape):
+        self.model_layers = [
+            tf.layers.Conv2DTranspose(
+                self.channels,
+                [2, 2],
+                [2, 2],
+                name='upsample_1',
+                activation=None,
+            ),
+            self.activation,
+            tf.layers.Conv2DTranspose(
+                3,
+                [1, 1],
+                [1, 1],
+                name='upsample_2',
+                activation=None,
+            ),
+            self.activation,
+        ]
+        super().build(input_shape)
