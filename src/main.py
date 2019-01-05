@@ -124,10 +124,10 @@ class Compressor:
         self.decoder = tf.make_template(
             'decoder', layers.Decoder(FLAGS.channel_dims,)
         )
-        self.likelihoods = tf.make_template(
-            'likelihoods', layers.LatentDistribution()
-        )
-        self.distribution = self.likelihoods.distribution
+
+        likelihoods = layers.LatentDistribution()
+        self.likelihoods = tf.make_template('likelihoods', likelihoods)
+        self.distribution = likelihoods.distribution
         self.upsampler = tf.make_template(
             'upsampler',
             tf.layers.Conv2DTranspose(
