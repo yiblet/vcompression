@@ -80,9 +80,7 @@ class Compressor:
                 print(f'downsample: {pooled_input.shape}')
 
             pooled_output, latents, images = self.build(pooled_input, size // 2)
-            predicted_output = tf.image.resize_bilinear(
-                pooled_output, [size, size]
-            )
+            predicted_output = self.upsampler(pooled_output)
             if FLAGS.debug >= 1:
                 print(f'upsample: {predicted_output.shape}')
             residual = input - predicted_output
@@ -126,6 +124,9 @@ class Compressor:
         )
         self.decoder = tf.make_template(
             'decoder', layers.Decoder(FLAGS.channel_dims)
+        )
+        self.upsampler = tf.make_template(
+            'upsampler', layers.Upsampler(FLAGS.channel_dims)
         )
 
         likelihoods = layers.LatentDistribution()
