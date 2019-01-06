@@ -98,12 +98,12 @@ def define_flags(additional_flags=None):
     parser.add_argument(
         '-categorical_dims',
         default=5,
-        type=str,
+        type=int,
     )
     parser.add_argument(
         '-channel_dims',
         default=64,
-        type=str,
+        type=int,
     )
     parser.add_argument(
         '-disable_residual_block',
@@ -113,12 +113,12 @@ def define_flags(additional_flags=None):
     parser.add_argument(
         '-epochs',
         default=1000,
-        type=str,
+        type=int,
     )
     parser.add_argument(
         '-hidden_dims',
         default=32,
-        type=str,
+        type=int,
     )
     parser.add_argument(
         '-is_set',
@@ -128,7 +128,7 @@ def define_flags(additional_flags=None):
     parser.add_argument(
         '-learning_rate',
         default=1e-3,
-        type=str,
+        type=float,
     )
     parser.add_argument(
         '-run_type',
@@ -143,11 +143,11 @@ def define_flags(additional_flags=None):
     parser.add_argument(
         '-summary_frequency',
         default=200,
-        type=str,
+        type=int,
     )
     parser.add_argument(
         '-tensorboard_port',
-        default=8080,
+        default='8080',
         type=str,
     )
     parser.add_argument(
@@ -163,7 +163,7 @@ def define_flags(additional_flags=None):
     parser.add_argument(
         '-train_steps',
         default=600,
-        type=str,
+        type=int,
     )
     parser.add_argument(
         '-tunnel_loc',
@@ -173,7 +173,7 @@ def define_flags(additional_flags=None):
     parser.add_argument(
         '-holdout_size',
         default=200,
-        type=str,
+        type=int,
     )
     parser.add_argument(
         '-prefetch',
@@ -197,7 +197,7 @@ def define_flags(additional_flags=None):
     parser.add_argument(
         '-crop_size',
         default=32,
-        type=str,
+        type=int,
     )
 
     if hasattr(additional_flags, 'local'):
