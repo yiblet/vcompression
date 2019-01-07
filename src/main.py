@@ -80,7 +80,9 @@ class Compressor:
                 print(f'downsample: {pooled_input.shape}')
 
             pooled_output, latents, images = self.build(pooled_input, size // 2)
-            predicted_output = self.upsampler(pooled_output)
+            predicted_output = tf.image.resize_bilinear(
+                pooled_output, [size, size]
+            )
             if FLAGS.debug >= 1:
                 print(f'upsample: {predicted_output.shape}')
             residual = input - predicted_output

@@ -190,7 +190,7 @@ def define_flags(additional_flags=None):
     )
     parser.add_argument(
         '-fixed_size',
-        default=None,
+        default=64,
         type=int_or_none,
         help='fixed crop size',
     )
