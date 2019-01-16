@@ -80,6 +80,12 @@ def int_or_none(value):
         return int(value)
 
 
+def boolean_string(s):
+    if s not in {'False', 'True'}:
+        raise ValueError('Not a valid boolean string')
+    return s == 'True'
+
+
 def define_flags(additional_flags=None, modify_parser=None):
     reset = False    # @param {type: "boolean"}
     if (not reset) and FLAGS.is_set:
@@ -109,7 +115,7 @@ def define_flags(additional_flags=None, modify_parser=None):
     parser.add_argument(
         '-disable_residual_block',
         default=True,
-        type=bool,
+        type=boolean_string,
     )
     parser.add_argument(
         '-epochs',
@@ -124,7 +130,7 @@ def define_flags(additional_flags=None, modify_parser=None):
     parser.add_argument(
         '-is_set',
         default=True,
-        type=bool,
+        type=boolean_string,
     )
     parser.add_argument(
         '-learning_rate',
@@ -139,7 +145,7 @@ def define_flags(additional_flags=None, modify_parser=None):
     parser.add_argument(
         '-summarize',
         default=True,
-        type=bool,
+        type=boolean_string,
     )
     parser.add_argument(
         '-summary_frequency',
@@ -201,6 +207,13 @@ def define_flags(additional_flags=None, modify_parser=None):
         type=int,
     )
 
+    parser.add_argument(
+        '-progress',
+        default=True,
+        type=boolean_string,
+        help='display epoch progress results'
+    )
+
     if hasattr(additional_flags, 'local'):
         default_local = additional_flags.local
     else:
@@ -211,20 +224,13 @@ def define_flags(additional_flags=None, modify_parser=None):
     parser.add_argument(
         '-local',
         default=default_local,
-        type=bool,
+        type=boolean_string,
     )
 
     parser.add_argument(
         '-bucket',
         default=default_bucket,
         type=str,
-    )
-
-    parser.add_argument(
-        '-progress',
-        default=True,
-        type=bool,
-        help='display epoch progress results'
     )
 
     if default_local:
@@ -312,7 +318,7 @@ def define_flags(additional_flags=None, modify_parser=None):
     parser.add_argument(
         '-run_subprocesses',
         default=True,
-        type=bool,
+        type=boolean_string,
     )
 
     parser.parse_args(namespace=FLAGS)
