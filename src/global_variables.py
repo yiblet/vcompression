@@ -1,10 +1,7 @@
 from __future__ import absolute_import
-import numpy as np
 import subprocess
-import sys
 import os
 import types
-import tensorflow as tf
 import pprint
 import argparse
 
@@ -39,6 +36,7 @@ FLAGS = Namespace(is_set=False)
 def run_subprocesses():
     if not FLAGS.local:
         import atexit
+        import tensorflow as tf
 
         if 'COLAB_TPU_ADDR' in os.environ:
             FLAGS.tpu_address = 'grpc://' + os.environ['COLAB_TPU_ADDR']
@@ -82,12 +80,15 @@ def int_or_none(value):
         return int(value)
 
 
-def define_flags(additional_flags=None):
+def define_flags(additional_flags=None, modify_parser=None):
     reset = False    # @param {type: "boolean"}
     if (not reset) and FLAGS.is_set:
         return
 
     parser = argparse.ArgumentParser()
+
+    if modify_parser is not None:
+        modify_parser(parser)
 
     parser.add_argument(
         '-batch_size',
@@ -219,21 +220,33 @@ def define_flags(additional_flags=None):
         type=str,
     )
 
+    parser.add_argument(
+        '-progress',
+        default=True,
+        type=bool,
+        help='display epoch progress results'
+    )
+
     if default_local:
         default_data = 'data/cifar10'
         default_large_image_dir = 'local/images'
-        default_summaries_dir = 'local/summaries'
+        default_summaries_dir = 'local/saves'
+        default_saves_dir = 'local/summaries'
         default_tf_records_dir = 'local/records'
         default_tpu_address = None
         print('running locally')
     else:
-        print('mounting google drive')
-        from google.colab import auth
-        auth.authenticate_user()
+        try:
+            print('mounting google drive')
+            from google.colab import auth
+            auth.authenticate_user()
+        except ImportError:
+            print('mounting failed')
 
         default_data = '/gdrive/My Drive/cifar10'
         default_large_image_dir = f'{default_bucket}/images'
         default_summaries_dir = f'{default_bucket}/summaries'
+        default_saves_dir = f'{default_bucket}/saves'
         default_tf_records_dir = default_data
         default_tpu_address = None
 
@@ -279,6 +292,12 @@ def define_flags(additional_flags=None):
     )
 
     parser.add_argument(
+        '-saves_dir',
+        default=default_saves_dir,
+        type=str,
+    )
+
+    parser.add_argument(
         '-tf_records_dir',
         default=default_tf_records_dir,
         type=str,
@@ -292,7 +311,7 @@ def define_flags(additional_flags=None):
 
     parser.add_argument(
         '-run_subprocesses',
-        default=False,
+        default=True,
         type=bool,
     )
 
@@ -303,7 +322,8 @@ def define_flags(additional_flags=None):
 
     FLAGS.use_tpu = FLAGS.tpu_address is not None
 
-    run_subprocesses()
+    if FLAGS.run_subprocesses:
+        run_subprocesses()
 
 
 if __name__ == "__main__":
