@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from global_variables import *
 import pickle
 import numpy as np
+import tensorflow as tf
 
 
 def cifar_input_fn(test=False):

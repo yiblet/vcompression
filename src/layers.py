@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from global_variables import *
 import summary
 import tensorflow as tf
+import numpy as np
 import tensorflow_probability as tfp
 
 
