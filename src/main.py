@@ -131,7 +131,7 @@ class Compressor:
         return (output, latents, images)
 
     def build_reused_layers(self):
-        if FLAGS.reuse:
+        if not FLAGS.reuse:
             template = no_reuse
         else:
             template = make_template
