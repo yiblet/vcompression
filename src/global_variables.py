@@ -208,6 +208,13 @@ def define_flags(additional_flags=None, modify_parser=None):
     )
 
     parser.add_argument(
+        '-reuse',
+        default=False,
+        type=boolean_string,
+        help='wether or not to reuse neural networks across dimensions'
+    )
+
+    parser.add_argument(
         '-progress',
         default=True,
         type=boolean_string,

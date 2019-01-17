@@ -19,6 +19,19 @@ import time
 tf.reset_default_graph()
 
 
+def make_template(scope_name, layer_func):
+    return tf.make_template(scope_name, layer_func())
+
+
+def no_reuse(scope_name, layer_func):
+
+    def res(input):
+        with tf.name_scope(scope_name):
+            return layer_func()(input)
+
+    return res
+
+
 def log_sampling_information(latent, distribution):
     with summary.SummaryScope('samples') as scope:
         samples = tf.layers.flatten(latent)
@@ -118,21 +131,29 @@ class Compressor:
         return (output, latents, images)
 
     def build_reused_layers(self):
-        self.encoder = tf.make_template(
-            'encoder', layers.Encoder(
-                FLAGS.channel_dims,
-                FLAGS.hidden_dims,
-            )
+        if FLAGS.reuse:
+            template = no_reuse
+        else:
+            template = make_template
+
+        self.encoder = template(
+                'encoder',
+                lambda: layers.Encoder(FLAGS.channel_dims, FLAGS.hidden_dims,)
         )
-        self.decoder = tf.make_template(
-            'decoder', layers.Decoder(FLAGS.channel_dims)
+        self.decoder = template(
+            'decoder',
+            lambda: layers.Decoder(FLAGS.channel_dims),
         )
-        self.upsampler = tf.make_template(
-            'upsampler', layers.Upsampler(FLAGS.channel_dims)
+        self.upsampler = template(
+            'upsampler',
+            lambda: layers.Upsampler(FLAGS.channel_dims),
         )
 
         likelihoods = layers.LatentDistribution()
-        self.likelihoods = tf.make_template('likelihoods', likelihoods)
+        self.likelihoods = template(
+            'likelihoods',
+            lambda: likelihoods,
+        )
         self.distribution = likelihoods.distribution
 
     def build_losses(self):
