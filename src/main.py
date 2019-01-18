@@ -116,11 +116,11 @@ class Compressor:
         images.append(
             tf.concat(
                 [
-                    tf.gather(input, self.image_summary_idx),
-                    tf.gather(predicted_output, self.image_summary_idx),
-                    tf.gather(residual, self.image_summary_idx),
-                    tf.gather(decoded, self.image_summary_idx),
-                    tf.gather(output, self.image_summary_idx),
+                    input,
+                    predicted_output,
+                    residual,
+                    decoded,
+                    output,
                 ],
                 axis=2,
             )
@@ -187,8 +187,11 @@ class Compressor:
         merged = tf.summary.merge_all()
 
         images_summary = tf.summary.merge([
-            tf.summary.image(f'comparison_{idx}', image, max_outputs=10)
-            for idx, image in enumerate(self.images)
+            tf.summary.image(
+                f'comparison_{idx}',
+                image,
+                max_outputs=FLAGS.batch_size,
+            ) for idx, image in enumerate(self.images)
         ])
 
         self.train_loss = train_loss
