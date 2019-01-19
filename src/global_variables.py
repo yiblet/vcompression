@@ -99,7 +99,7 @@ def define_flags(additional_flags=None, modify_parser=None):
     parser.add_argument(
         '-batch_size',
         default=16,
-        type=str,
+        type=int,
         help=f'the batch size, default: {16}'
     )
     parser.add_argument(
