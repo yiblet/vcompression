@@ -71,9 +71,10 @@ class Compressor:
 
     def new_original_dim(self, original_dim):
         self.original_dim = original_dim
-        self.output, self.latents, self.images = self.build(
-            self.data, original_dim[0]
-        )
+        with summary.SummaryScope('network') as scope:
+            _, self.latents, self.images, self.outputs = self.build(
+                self.data, original_dim[0]
+            )
         self.build_losses()
 
     def build(self, input, size):
@@ -81,6 +82,7 @@ class Compressor:
         if size <= 16:    # TODO make this a flag
             latents = []
             images = []
+            outputs = []
             residual = input
             predicted_output = tf.zeros_like(input)
             if FLAGS.debug >= 1:
@@ -92,7 +94,9 @@ class Compressor:
             if FLAGS.debug >= 1:
                 print(f'downsample: {pooled_input.shape}')
 
-            pooled_output, latents, images = self.build(pooled_input, size // 2)
+            pooled_output, latents, images, outputs = self.build(
+                pooled_input, size // 2
+            )
             predicted_output = tf.image.resize_bilinear(
                 pooled_output, [size, size]
             )
@@ -126,9 +130,15 @@ class Compressor:
             )
         )
 
+        outputs.append({
+            'input': input,
+            'output': output,
+            'latent': latent,
+        })
+
         if FLAGS.debug >= 1:
             print(f'decoded: {output.shape}')
-        return (output, latents, images)
+        return (output, latents, images, outputs)
 
     def build_reused_layers(self):
         if not FLAGS.reuse:
@@ -160,7 +170,6 @@ class Compressor:
         num_pixels = np.prod(self.original_dim[:2])
 
         with summary.SummaryScope('losses') as scope:
-
             expected_bits_per_image = tf.reduce_sum(
                 [
                     tf.reduce_sum(
@@ -172,9 +181,14 @@ class Compressor:
             )
             train_bpp = tf.reduce_mean(expected_bits_per_image)
             train_bpp /= -np.log(2) * num_pixels
-            train_mse = tf.reduce_mean(
-                tf.squared_difference(self.test, self.output)
-            )
+            train_mse = tf.reduce_sum([
+                tf.reduce_mean(
+                    tf.squared_difference(
+                        layer['input'],
+                        layer['output'],
+                    )
+                ) for layer in self.outputs
+            ])
             train_mse *= 255**2 / num_pixels
             train_loss = train_mse * 0.05 + train_bpp
             scope['bpp'] = train_bpp

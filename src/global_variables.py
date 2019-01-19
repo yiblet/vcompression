@@ -211,14 +211,14 @@ def define_flags(additional_flags=None, modify_parser=None):
         '-reuse',
         default=True,
         type=boolean_string,
-        help='wether or not to reuse neural networks across dimensions'
+        help='wether or not to reuse neural networks across dimensions',
     )
 
     parser.add_argument(
         '-progress',
         default=True,
         type=boolean_string,
-        help='display epoch progress results'
+        help='display epoch progress results',
     )
 
     if hasattr(additional_flags, 'local'):
