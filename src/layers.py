@@ -203,7 +203,10 @@ class Encoder(SummaryModel):
             ),
             self.activation,
             ResidualBlock(
-                self.channels, kernel=[3, 3], activation=self.activation
+                self.channels,
+                kernel=[3, 3],
+                activation=self.activation,
+                use_batch_norm=False,
             ),
             tf.layers.Conv2D(
                 self.channels,
@@ -214,7 +217,10 @@ class Encoder(SummaryModel):
             ),
             self.activation,
             ResidualBlock(
-                self.channels, kernel=[3, 3], activation=self.activation
+                self.channels,
+                kernel=[3, 3],
+                activation=self.activation,
+                use_batch_norm=False,
             ),
             tf.layers.Conv2D(
                 self.channels,
@@ -225,7 +231,10 @@ class Encoder(SummaryModel):
             ),
             self.activation,
             ResidualBlock(
-                self.channels, kernel=[3, 3], activation=self.activation
+                self.channels,
+                kernel=[3, 3],
+                activation=self.activation,
+                use_batch_norm=False,
             ),
             tf.layers.Conv2D(
                 self.hidden,
@@ -267,7 +276,10 @@ class Decoder(SummaryModel):
             ),
             self.activation,
             ResidualBlock(
-                self.channels, kernel=[3, 3], activation=self.activation
+                self.channels,
+                kernel=[3, 3],
+                activation=self.activation,
+                use_batch_norm=False,
             ),
             tf.layers.Conv2DTranspose(
                 self.channels,
@@ -278,7 +290,10 @@ class Decoder(SummaryModel):
             ),
             self.activation,
             ResidualBlock(
-                self.channels, kernel=[3, 3], activation=self.activation
+                self.channels,
+                kernel=[3, 3],
+                activation=self.activation,
+                use_batch_norm=False,
             ),
             tf.layers.Conv2DTranspose(
                 self.channels,
@@ -289,7 +304,10 @@ class Decoder(SummaryModel):
             ),
             self.activation,
             ResidualBlock(
-                self.channels, kernel=[3, 3], activation=self.activation
+                self.channels,
+                kernel=[3, 3],
+                activation=self.activation,
+                use_batch_norm=False,
             ),
             tf.layers.Conv2DTranspose(
                 self.channels,

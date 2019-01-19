@@ -9,7 +9,6 @@ import subprocess
 import sys
 
 from global_variables import *
-import entropy
 import summary
 import util
 import layers
