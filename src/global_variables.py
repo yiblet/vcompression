@@ -324,7 +324,7 @@ def define_flags(additional_flags=None, modify_parser=None):
 
     parser.add_argument(
         '-run_subprocesses',
-        default=True,
+        default=False,
         type=boolean_string,
     )
 

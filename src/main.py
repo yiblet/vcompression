@@ -72,7 +72,7 @@ class Compressor:
     def new_original_dim(self, original_dim):
         self.original_dim = original_dim
         with summary.SummaryScope('network') as scope:
-            _, self.latents, self.images, self.outputs = self.build(
+            _, self.images, self.outputs = self.build(
                 self.data, original_dim[0]
             )
         self.build_losses()
@@ -80,7 +80,6 @@ class Compressor:
     def build(self, input, size):
         '''recursively builds residual autoencoder'''
         if size <= 16:    # TODO make this a flag
-            latents = []
             images = []
             outputs = []
             residual = input
@@ -94,9 +93,7 @@ class Compressor:
             if FLAGS.debug >= 1:
                 print(f'downsample: {pooled_input.shape}')
 
-            pooled_output, latents, images, outputs = self.build(
-                pooled_input, size // 2
-            )
+            pooled_output, images, outputs = self.build(pooled_input, size // 2)
             predicted_output = tf.image.resize_bilinear(
                 pooled_output, [size, size]
             )
@@ -108,7 +105,6 @@ class Compressor:
         if FLAGS.debug >= 1:
             print(f'encoded: {latent.shape}')
         latent = layers.Quantizer()(latent)
-        latents.append(latent)
 
         decoded = self.decoder(latent)
 
@@ -138,7 +134,7 @@ class Compressor:
 
         if FLAGS.debug >= 1:
             print(f'decoded: {output.shape}')
-        return (output, latents, images, outputs)
+        return (output, images, outputs)
 
     def build_reused_layers(self):
         if not FLAGS.reuse:
@@ -173,9 +169,9 @@ class Compressor:
             expected_bits_per_image = tf.reduce_sum(
                 [
                     tf.reduce_sum(
-                        tf.log(self.likelihoods(latent) + 1e-12),
+                        tf.log(self.likelihoods(layer['latent']) + 1e-12),
                         axis=[1, 2, 3]
-                    ) for latent in self.latents
+                    ) for layer in self.outputs
                 ],
                 axis=[0],
             )
@@ -187,7 +183,7 @@ class Compressor:
                         layer['input'],
                         layer['output'],
                     )
-                ) for layer in self.outputs
+                ) for layer in self.outputs[1:]
             ])
             train_mse *= 255**2 / num_pixels
             train_loss = train_mse * 0.05 + train_bpp
