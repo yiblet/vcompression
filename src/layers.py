@@ -7,10 +7,10 @@ import tensorflow_probability as tfp
 
 
 @tf.custom_gradient
-def scale_gradient(input, scale):
+def scale_gradient(input):
 
     def grad(dy):
-        return dy * scale
+        return dy * FLAGS.latent_gamma
 
     return input, grad
 
@@ -82,7 +82,7 @@ class LatentDistribution(tf.keras.layers.Layer):
 
     def call(self, latent):
 
-        stopped_latents = scale_gradient(latent, FLAGS.latent_gamma)
+        stopped_latents = scale_gradient(latent)
         likelihoods = self._distribution.cdf(
             tf.clip_by_value(stopped_latents + 0.5 / 255.0, 0.0, 1.0)
         ) - self._distribution.cdf(
