@@ -102,92 +102,110 @@ def define_flags(additional_flags=None, modify_parser=None):
         type=int,
         help=f'the batch size, default: {16}'
     )
+
     parser.add_argument(
         '-categorical_dims',
         default=5,
         type=int,
     )
+
     parser.add_argument(
         '-channel_dims',
         default=64,
         type=int,
     )
+
     parser.add_argument(
         '-disable_residual_block',
         default=True,
         type=boolean_string,
     )
+
     parser.add_argument(
         '-epochs',
         default=1000,
         type=int,
     )
+
     parser.add_argument(
         '-hidden_dims',
         default=32,
         type=int,
     )
+
     parser.add_argument(
         '-is_set',
         default=True,
         type=boolean_string,
     )
+
     parser.add_argument(
         '-learning_rate',
         default=1e-3,
         type=float,
     )
+
     parser.add_argument(
         '-run_type',
         default='primary',
         type=str,
     )
+
     parser.add_argument(
         '-summarize',
         default=True,
         type=boolean_string,
     )
+
     parser.add_argument(
         '-summary_frequency',
         default=200,
         type=int,
     )
+
     parser.add_argument(
         '-tensorboard_port',
         default='8080',
         type=str,
     )
+
     parser.add_argument(
         '-test_dir',
         default='test',
         type=str,
     )
+
     parser.add_argument(
         '-train_dir',
         default='train',
         type=str,
     )
+
     parser.add_argument(
         '-train_steps',
         default=600,
         type=int,
     )
+
     parser.add_argument(
         '-tunnel_loc',
         default='yiblet',
         type=str,
     )
+
     parser.add_argument(
         '-holdout_size',
         default=200,
         type=int,
     )
+
     parser.add_argument(
         '-prefetch',
         default=40,
         type=int,
         help='amount to be fetched in advance',
     )
+
     parser.add_argument(
         '-increment_size_intervals',
         nargs='*',
@@ -195,16 +213,25 @@ def define_flags(additional_flags=None, modify_parser=None):
         type=int,
         help='epoch at which the model doubles in size',
     )
+
     parser.add_argument(
         '-fixed_size',
         default=64,
         type=int_or_none,
         help='fixed crop size',
     )
+
     parser.add_argument(
         '-crop_size',
         default=32,
         type=int,
+    )
+
+    parser.add_argument(
+        '-latent_gamma',
+        default=0.0,
+        type=float,
+        help='the scale factor of how much that gradient is affected'
     )
 
     parser.add_argument(
