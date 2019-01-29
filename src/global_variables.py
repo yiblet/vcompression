@@ -33,7 +33,7 @@ class Namespace(types.SimpleNamespace):
 FLAGS = Namespace(is_set=False)
 
 
-def run_subprocesses():
+def post_setup():
     if not FLAGS.local:
         import atexit
         import tensorflow as tf
@@ -362,8 +362,7 @@ def define_flags(additional_flags=None, modify_parser=None):
 
     FLAGS.use_tpu = FLAGS.tpu_address is not None
 
-    if FLAGS.run_subprocesses:
-        run_subprocesses()
+    post_setup()
 
 
 if __name__ == "__main__":
