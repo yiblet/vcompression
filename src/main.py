@@ -19,7 +19,17 @@ tf.reset_default_graph()
 
 
 def make_template(scope_name, layer_func):
-    return tf.make_template(scope_name, layer_func())
+
+    template = tf.make_template(scope_name, layer_func())
+
+    def res(size, input):
+        if size <= 16:
+            return template(input)
+        else:
+            with tf.name_scope("first_" + scope_name):
+                return layer_func()(input)
+
+    return res
 
 
 def no_reuse(scope_name, layer_func):
@@ -28,7 +38,7 @@ def no_reuse(scope_name, layer_func):
         with tf.name_scope(scope_name):
             return layer_func()(input)
 
-    return res
+    return lambda size, input: res(input)
 
 
 def log_sampling_information(latent, distribution):
@@ -100,12 +110,12 @@ class Compressor:
                 print(f'upsample: {predicted_output.shape}')
             residual = input - predicted_output
 
-        latent = self.encoder(residual)
+        latent = self.encoder(size, residual)
         if FLAGS.debug >= 1:
             print(f'encoded: {latent.shape}')
         latent = layers.Quantizer()(latent)
 
-        decoded = self.decoder(latent)
+        decoded = self.decoder(size, latent)
 
         if size <= 16:    # TODO make this a flag
             output = tf.nn.relu(decoded)
@@ -128,7 +138,7 @@ class Compressor:
         outputs.append({
             'input': input,
             'output': output,
-            'latent': latent,
+            'likelihood': self.likelihoods(size, latent),
         })
 
         if FLAGS.debug >= 1:
@@ -154,12 +164,10 @@ class Compressor:
             lambda: layers.Upsampler(FLAGS.channel_dims),
         )
 
-        likelihoods = layers.LatentDistribution()
         self.likelihoods = template(
             'likelihoods',
-            lambda: likelihoods,
+            lambda: layers.LatentDistribution(),
         )
-        self.distribution = likelihoods.distribution
 
     def build_losses(self):
         num_pixels = np.prod(self.original_dim[:2])
@@ -168,8 +176,8 @@ class Compressor:
             expected_bits_per_image = tf.reduce_sum(
                 [
                     tf.reduce_sum(
-                        tf.log(self.likelihoods(layer['latent']) + 1e-12),
-                        axis=[1, 2, 3]
+                        tf.log(layer['likelihood'] + 1e-12),
+                        axis=[1, 2, 3],
                     ) for layer in self.outputs
                 ],
                 axis=[0],
@@ -182,7 +190,7 @@ class Compressor:
                         layer['input'],
                         layer['output'],
                     )
-                ) for layer in self.outputs[1:]
+                ) for idx, layer in enumerate(self.outputs[1:])
             ])
             train_mse *= 255**2 / num_pixels
             train_loss = train_mse * 0.05 + train_bpp
