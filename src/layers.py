@@ -15,6 +15,47 @@ def scale_gradient(input):
     return input, grad
 
 
+class SpectralNorm(tf.keras.constraints.Constraint):
+
+    def __init__(self, iteration=1):
+        self.iteration = iteration
+        self.u = tf.get_variable(
+            "u", [1, w_shape[-1]],
+            initializer=tf.random_normal_initializer(),
+            trainable=False
+        )
+
+    def __call__(self, w):
+        w_shape = w.shape.as_list()
+        w = tf.reshape(w, [-1, w_shape[-1]])
+
+        u_hat = self.u
+        v_hat = None
+        for i in range(self.iteration):
+            v_ = tf.matmul(u_hat, tf.transpose(w))
+            v_hat = tf.nn.l2_normalize(v_)
+
+            u_ = tf.matmul(v_hat, w)
+            u_hat = tf.nn.l2_normalize(u_)
+
+        u_hat = tf.stop_gradient(u_hat)
+        v_hat = tf.stop_gradient(v_hat)
+
+        sigma = tf.matmul(tf.matmul(v_hat, w), tf.transpose(u_hat))
+
+        with tf.control_dependencies([self.u.assign(u_hat)]):
+            w_norm = w / sigma
+            w_norm = tf.reshape(w_norm, w_shape)
+
+        return w_norm
+
+    def get_config(self):
+        return {
+            "iteration": self.iteration,
+            "u": self.u,
+        }
+
+
 class Quantizer(tf.keras.layers.Layer):
 
     def call(self, input):
@@ -208,12 +249,16 @@ class Encoder(SummaryModel):
     def build(self, input_shape):
         self.model_layers = [
             tf.layers.Conv2D(
-                self.channels, [2, 2], [2, 2], name='conv_1', activation=None
+                self.channels,
+                [2, 2],
+                [2, 2],
+                name='conv_1',
+                activation=None,
             ),
             self.activation,
             ResidualBlock(
                 self.channels,
-                kernel=[3, 3],
+                kernel=[2, 2],
                 activation=self.activation,
                 use_batch_norm=False,
             ),
@@ -227,7 +272,7 @@ class Encoder(SummaryModel):
             self.activation,
             ResidualBlock(
                 self.channels,
-                kernel=[3, 3],
+                kernel=[2, 2],
                 activation=self.activation,
                 use_batch_norm=False,
             ),
@@ -241,7 +286,7 @@ class Encoder(SummaryModel):
             self.activation,
             ResidualBlock(
                 self.channels,
-                kernel=[3, 3],
+                kernel=[2, 2],
                 activation=self.activation,
                 use_batch_norm=False,
             ),
@@ -286,7 +331,7 @@ class Decoder(SummaryModel):
             self.activation,
             ResidualBlock(
                 self.channels,
-                kernel=[3, 3],
+                kernel=[2, 2],
                 activation=self.activation,
                 use_batch_norm=False,
             ),
@@ -300,7 +345,7 @@ class Decoder(SummaryModel):
             self.activation,
             ResidualBlock(
                 self.channels,
-                kernel=[3, 3],
+                kernel=[2, 2],
                 activation=self.activation,
                 use_batch_norm=False,
             ),
@@ -314,7 +359,7 @@ class Decoder(SummaryModel):
             self.activation,
             ResidualBlock(
                 self.channels,
-                kernel=[3, 3],
+                kernel=[2, 2],
                 activation=self.activation,
                 use_batch_norm=False,
             ),
