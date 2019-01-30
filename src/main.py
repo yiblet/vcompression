@@ -190,7 +190,7 @@ class Compressor:
                         layer['input'],
                         layer['output'],
                     )
-                ) for idx, layer in enumerate(self.outputs[1:])
+                ) for idx, layer in enumerate(self.outputs[:])
             ])
             train_mse *= 255**2 / num_pixels
             train_loss = train_mse * 0.05 + train_bpp
