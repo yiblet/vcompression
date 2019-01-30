@@ -23,7 +23,7 @@ def make_template(scope_name, layer_func):
     template = tf.make_template(scope_name, layer_func())
 
     def res(size, input):
-        if size <= 16:
+        if size > 16:
             return template(input)
         else:
             with tf.name_scope("first_" + scope_name):
