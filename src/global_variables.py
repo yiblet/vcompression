@@ -248,6 +248,12 @@ def define_flags(additional_flags=None, modify_parser=None):
         help='display epoch progress results',
     )
 
+    parser.add_argument(
+        '-enable_spectral_normalization',
+        default=False,
+        type=boolean_string,
+    )
+
     if hasattr(additional_flags, 'local'):
         default_local = additional_flags.local
     else:

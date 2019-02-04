@@ -4,6 +4,21 @@ import summary
 import tensorflow as tf
 import numpy as np
 import tensorflow_probability as tfp
+from spectral_norm import ConvSN2D, ConvSN2DTranspose
+
+
+def conv2d(*args, **kwargs):
+    if FLAGS.enable_spectral_normalization:
+        return ConvSN2D(*args, **kwargs)
+    else:
+        return tf.layers.Conv2D(*args, **kwargs)
+
+
+def conv2d_transpose(*args, **kwargs):
+    if FLAGS.enable_spectral_normalization:
+        return ConvSN2DTranspose(*args, **kwargs)
+    else:
+        return tf.layers.Conv2DTranspose(*args, **kwargs)
 
 
 @tf.custom_gradient
@@ -172,7 +187,7 @@ class ResidualBlock(tf.keras.Model):
 
         with tf.name_scope(self.name):
             self.model_layers = [
-                tf.layers.Conv2D(
+                conv2d(
                     self.channels,
                     self.kernel,
                     dilation_rate=[2, 2],
@@ -183,7 +198,7 @@ class ResidualBlock(tf.keras.Model):
                 ),
                 create_batch_norm,
                 self.activation[0],
-                tf.layers.Conv2D(
+                conv2d(
                     self.channels,
                     self.kernel,
                     name="conv2d_2",
@@ -248,7 +263,7 @@ class Encoder(SummaryModel):
 
     def build(self, input_shape):
         self.model_layers = [
-            tf.layers.Conv2D(
+            conv2d(
                 self.channels,
                 [2, 2],
                 [2, 2],
@@ -262,7 +277,7 @@ class Encoder(SummaryModel):
                 activation=self.activation,
                 use_batch_norm=False,
             ),
-            tf.layers.Conv2D(
+            conv2d(
                 self.channels,
                 [2, 2],
                 [2, 2],
@@ -276,7 +291,7 @@ class Encoder(SummaryModel):
                 activation=self.activation,
                 use_batch_norm=False,
             ),
-            tf.layers.Conv2D(
+            conv2d(
                 self.channels,
                 [2, 2],
                 [2, 2],
@@ -290,7 +305,7 @@ class Encoder(SummaryModel):
                 activation=self.activation,
                 use_batch_norm=False,
             ),
-            tf.layers.Conv2D(
+            conv2d(
                 self.hidden,
                 [2, 2],
                 [2, 2],
@@ -321,7 +336,7 @@ class Decoder(SummaryModel):
 
     def build(self, input_shape):
         self.model_layers = [
-            tf.layers.Conv2DTranspose(
+            conv2d_transpose(
                 self.channels,
                 [2, 2],
                 [2, 2],
@@ -335,7 +350,7 @@ class Decoder(SummaryModel):
                 activation=self.activation,
                 use_batch_norm=False,
             ),
-            tf.layers.Conv2DTranspose(
+            conv2d_transpose(
                 self.channels,
                 [2, 2],
                 [2, 2],
@@ -349,7 +364,7 @@ class Decoder(SummaryModel):
                 activation=self.activation,
                 use_batch_norm=False,
             ),
-            tf.layers.Conv2DTranspose(
+            conv2d_transpose(
                 self.channels,
                 [2, 2],
                 [2, 2],
@@ -363,7 +378,7 @@ class Decoder(SummaryModel):
                 activation=self.activation,
                 use_batch_norm=False,
             ),
-            tf.layers.Conv2DTranspose(
+            conv2d_transpose(
                 self.channels,
                 [2, 2],
                 [2, 2],
@@ -371,7 +386,7 @@ class Decoder(SummaryModel):
                 activation=None,
             ),
             self.activation,
-            tf.layers.Conv2DTranspose(
+            conv2d_transpose(
                 3,
                 [1, 1],
                 [1, 1],
@@ -402,7 +417,7 @@ class Upsampler(SummaryModel):
 
     def build(self, input_shape):
         self.model_layers = [
-            tf.layers.Conv2DTranspose(
+            conv2d_transpose(
                 self.channels,
                 [2, 2],
                 [2, 2],
@@ -410,7 +425,7 @@ class Upsampler(SummaryModel):
                 activation=None,
             ),
             self.activation,
-            tf.layers.Conv2DTranspose(
+            conv2d_transpose(
                 3,
                 [1, 1],
                 [1, 1],
