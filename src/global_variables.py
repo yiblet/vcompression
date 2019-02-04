@@ -235,13 +235,6 @@ def define_flags(additional_flags=None, modify_parser=None):
     )
 
     parser.add_argument(
-        '-enable_spectral_norm_constraint',
-        default=False,
-        type=boolean_string,
-        help='adding the spectral norm constraint'
-    )
-
-    parser.add_argument(
         '-reuse',
         default=True,
         type=boolean_string,

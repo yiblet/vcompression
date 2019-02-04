@@ -15,41 +15,26 @@ def scale_gradient(input):
     return input, grad
 
 
-def spectral_norm(u_dims):
-    if FLAGS.enable_spectral_norm_constraint:
-        return SpectralNorm(u_dims)
-    else:
-        return None
-
-
-SPECTRAL_COUNT = 0
-
-
 class SpectralNorm(tf.keras.constraints.Constraint):
 
-    def __init__(self, u_dims, iteration=1):
-        global SPECTRAL_COUNT
-
-        self.count = SPECTRAL_COUNT
-        SPECTRAL_COUNT += 1
-        self.u_dims = u_dims
+    def __init__(self, iteration=1):
         self.iteration = iteration
-        with tf.name_scope('spectral_norm'):
-            self.u = tf.get_variable(
-                f"u_{self.count}", [1, u_dims],
-                initializer=tf.random_normal_initializer(),
-                trainable=False
-            )
+        self.u = tf.get_variable(
+            "u", [1, w_shape[-1]],
+            initializer=tf.random_normal_initializer(),
+            trainable=False
+        )
 
     def __call__(self, w):
         w_shape = w.shape.as_list()
-        w = tf.reshape(w, [-1, self.u_dims])
+        w = tf.reshape(w, [-1, w_shape[-1]])
 
         u_hat = self.u
         v_hat = None
         for i in range(self.iteration):
             v_ = tf.matmul(u_hat, tf.transpose(w))
             v_hat = tf.nn.l2_normalize(v_)
+
             u_ = tf.matmul(v_hat, w)
             u_hat = tf.nn.l2_normalize(u_)
 
@@ -67,8 +52,6 @@ class SpectralNorm(tf.keras.constraints.Constraint):
     def get_config(self):
         return {
             "iteration": self.iteration,
-            "u_dims": self.u_dims,
-            "count": self.count,
             "u": self.u,
         }
 
@@ -197,7 +180,6 @@ class ResidualBlock(tf.keras.Model):
                     activation=None,
                     padding="same",
                     trainable=self.trainable,
-                    kernel_constraint=spectral_norm(self.channels),
                 ),
                 create_batch_norm,
                 self.activation[0],
@@ -208,7 +190,6 @@ class ResidualBlock(tf.keras.Model):
                     activation=None,
                     padding="same",
                     trainable=self.trainable,
-                    kernel_constraint=spectral_norm(self.channels),
                 ),
                 last_batch_norm,
             ]
@@ -273,7 +254,6 @@ class Encoder(SummaryModel):
                 [2, 2],
                 name='conv_1',
                 activation=None,
-                kernel_constraint=spectral_norm(self.channels),
             ),
             self.activation,
             ResidualBlock(
@@ -288,7 +268,6 @@ class Encoder(SummaryModel):
                 [2, 2],
                 name='conv_2',
                 activation=None,
-                kernel_constraint=spectral_norm(self.channels),
             ),
             self.activation,
             ResidualBlock(
@@ -303,7 +282,6 @@ class Encoder(SummaryModel):
                 [2, 2],
                 name='conv_3',
                 activation=None,
-                kernel_constraint=spectral_norm(self.channels),
             ),
             self.activation,
             ResidualBlock(
@@ -318,7 +296,6 @@ class Encoder(SummaryModel):
                 [2, 2],
                 name='conv_4',
                 activation=tf.nn.sigmoid,
-                kernel_constraint=spectral_norm(self.hidden),
             ),
         ]
         super().build(input_shape)
@@ -350,7 +327,6 @@ class Decoder(SummaryModel):
                 [2, 2],
                 name='deconv_2',
                 activation=None,
-                kernel_constraint=spectral_norm(self.channels),
             ),
             self.activation,
             ResidualBlock(
@@ -365,7 +341,6 @@ class Decoder(SummaryModel):
                 [2, 2],
                 name='deconv_3',
                 activation=None,
-                kernel_constraint=spectral_norm(self.channels),
             ),
             self.activation,
             ResidualBlock(
@@ -380,7 +355,6 @@ class Decoder(SummaryModel):
                 [2, 2],
                 name='deconv_4',
                 activation=None,
-                kernel_constraint=spectral_norm(self.channels),
             ),
             self.activation,
             ResidualBlock(
@@ -395,7 +369,6 @@ class Decoder(SummaryModel):
                 [2, 2],
                 name='deconv_5',
                 activation=None,
-                kernel_constraint=spectral_norm(self.channels),
             ),
             self.activation,
             tf.layers.Conv2DTranspose(
@@ -404,7 +377,6 @@ class Decoder(SummaryModel):
                 [1, 1],
                 name='deconv_6',
                 activation=None,
-                kernel_constraint=spectral_norm(3),
             ),
         ]
         super().build(input_shape)
@@ -436,7 +408,6 @@ class Upsampler(SummaryModel):
                 [2, 2],
                 name='upsample_1',
                 activation=None,
-                kernel_constraint=spectral_norm(self.channels),
             ),
             self.activation,
             tf.layers.Conv2DTranspose(
@@ -445,7 +416,6 @@ class Upsampler(SummaryModel):
                 [1, 1],
                 name='upsample_2',
                 activation=None,
-                kernel_constraint=spectral_norm(3),
             ),
             self.activation,
         ]
