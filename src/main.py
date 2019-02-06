@@ -17,13 +17,15 @@ import time
 
 tf.reset_default_graph()
 
+MIN_SIZE = 8
+
 
 def make_template(scope_name, layer_func):
 
     template = tf.make_template(scope_name, layer_func())
 
     def res(size, input):
-        if size > 16:
+        if size > MIN_SIZE:
             return template(input)
         else:
             with tf.name_scope("first_" + scope_name):
@@ -88,7 +90,7 @@ class Compressor:
 
     def build(self, input, size):
         '''recursively builds residual autoencoder'''
-        if size <= 16:    # TODO make this a flag
+        if size <= MIN_SIZE:    # TODO make this a flag
             images = []
             outputs = []
             residual = input
@@ -117,7 +119,7 @@ class Compressor:
 
         decoded = self.decoder(size, latent)
 
-        if size <= 16:    # TODO make this a flag
+        if size <= MIN_SIZE:    # TODO make this a flag
             output = tf.nn.relu(decoded)
         else:
             output = tf.nn.relu(decoded + predicted_output)
@@ -286,7 +288,7 @@ def main():
     print('--------------')
 
     if FLAGS.fixed_size is None:
-        current_size = 16
+        current_size = MIN_SIZE
     else:
         current_size = FLAGS.fixed_size
 
