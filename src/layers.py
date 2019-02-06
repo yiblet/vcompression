@@ -277,9 +277,24 @@ class Encoder(SummaryModel):
                 use_batch_norm=False,
             ),
             tf.layers.Conv2D(
+                self.channels,
+                [2, 2],
+                [2, 2],
+                name='conv_3',
+                activation=None,
+            ),
+            self.activation,
+            ResidualBlock(
+                self.channels,
+                kernel=[2, 2],
+                activation=self.activation,
+                use_batch_norm=False,
+            ),
+            tf.layers.Conv2D(
                 self.hidden,
                 [2, 2],
-                [2, 2],
+                [1, 1],
+                padding='same',
                 name='conv_4',
                 activation=tf.nn.sigmoid,
             ),
@@ -343,12 +358,19 @@ class Decoder(SummaryModel):
                 activation=None,
             ),
             self.activation,
+            ResidualBlock(
+                self.channels,
+                kernel=[2, 2],
+                activation=self.activation,
+                use_batch_norm=False,
+            ),
             tf.layers.Conv2DTranspose(
                 3,
-                [1, 1],
+                [2, 2],
                 [1, 1],
                 name='deconv_6',
                 activation=None,
+                padding='same',
             ),
         ]
         super().build(input_shape)
