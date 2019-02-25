@@ -212,11 +212,12 @@ class Compressor:
                 max_outputs=FLAGS.batch_size,
             ) for idx, image in enumerate(self.images)
         ])
-
         self.train_loss = train_loss
         self.train_op = train_op
         self.merged = merged
         self.images_summary = images_summary
+        self.train_bpp = train_bpp
+        self.train_mse = train_mse
 
     def tensors(self):
         return (
@@ -224,6 +225,8 @@ class Compressor:
             self.train_op,
             self.merged,
             self.images_summary,
+            self.train_bpp,
+            self.train_mse,
         )
 
 
@@ -300,7 +303,7 @@ def main():
         data,
         original_dim=(current_size, current_size, 3),
     )
-    elbo, optimize, merged, images = compressor.tensors()
+    elbo, optimize, merged, images, bpp, mse = compressor.tensors()
 
     print_params()
 
@@ -354,7 +357,7 @@ def main():
                     current_size,
                     3,
                 ))
-                elbo, optimize, merged, images = compressor.tensors()
+                elbo, optimize, merged, images, bpp, mse = compressor.tensors()
                 initialize_uninitialized(sess)
                 sess.run(
                     initializers,
@@ -371,8 +374,8 @@ def main():
                     use_train_data: False,
                 }
 
-            test_elbo, summary, images_summary = sess.run([
-                elbo, merged, images
+            test_mse, test_bpp, summary, images_summary = sess.run([
+                mse, bpp, merged, images
             ], feed)
             test_writer.add_summary(summary, FLAGS.train_steps * epoch)
             test_writer.add_summary(images_summary, FLAGS.train_steps * epoch)
@@ -395,8 +398,8 @@ def main():
                         trace_level=tf.RunOptions.FULL_TRACE
                     )
                     run_metadata = tf.RunMetadata()
-                    train_elbo, _, summary = sess.run(
-                        [elbo, optimize, merged],
+                    train_mse, train_bpp, _, summary = sess.run(
+                        [mse, bpp, optimize, merged],
                         feed,
                         options=run_options,
                         run_metadata=run_metadata,
@@ -408,20 +411,31 @@ def main():
                         global_step=global_step
                     )
                 elif train_step % FLAGS.summary_frequency == 0:
-                    train_elbo, _, summary = sess.run([elbo, optimize, merged],
-                                                      feed)
+                    train_mse, train_bpp, _, summary = sess.run(
+                        [mse, bpp, optimize, merged],
+                        feed,
+                    )
                     train_writer.add_summary(summary, global_step)
                 else:
-                    train_elbo, _ = sess.run([elbo, optimize], feed)
+                    train_mse, train_bpp, _ = sess.run(
+                        [mse, bpp, optimize],
+                        feed,
+                    )
 
                 if FLAGS.progress:
                     print(
-                        f'Epoch: {epoch} step: {train_step} train elbo: {train_elbo:.5f}',
+                        f'Epoch: {epoch} '
+                        f'step: {train_step} '
+                        f'train mse: {train_mse:.5f} '
+                        f'train bpp: {train_bpp:.5f} ',
                         end='\r'
                     )
 
             print(
-                f'Epoch: {epoch} elbo: {test_elbo} time elapsed: {time.time() - start_time:.2f} seconds'
+                f'Epoch: {epoch} '
+                f'mse: {test_mse:.6f} '
+                f'bpp: {test_bpp:.6f} '
+                f'time elapsed: {time.time() - start_time:.3f} seconds '
             )
 
     finally:
