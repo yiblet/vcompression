@@ -184,6 +184,7 @@ class Compressor:
                 ],
                 axis=[0],
             )
+
             train_bpp = tf.reduce_mean(expected_bits_per_image)
             train_bpp /= -np.log(2) * num_pixels
             train_mse = tf.reduce_sum([
@@ -196,9 +197,19 @@ class Compressor:
             ])
             train_mse *= 255**2 / num_pixels
             train_loss = train_mse * 0.05 + train_bpp
+
+            train_psnr = tf.reduce_mean(
+                tf.image.psnr(
+                    self.outputs[-1]['output'],
+                    self.outputs[-1]['input'],
+                    1.0,
+                )
+            )
+
             scope['bpp'] = train_bpp
             scope['mse'] = train_mse
             scope['loss'] = train_loss
+            scope['psnr'] = train_psnr
 
         train_op = tf.train.AdamOptimizer(FLAGS.learning_rate) \
             .minimize(train_loss)
@@ -218,6 +229,7 @@ class Compressor:
         self.images_summary = images_summary
         self.train_bpp = train_bpp
         self.train_mse = train_mse
+        self.train_psnr = train_psnr
 
     def tensors(self):
         return (
@@ -227,6 +239,7 @@ class Compressor:
             self.images_summary,
             self.train_bpp,
             self.train_mse,
+            self.train_psnr,
         )
 
 
@@ -303,7 +316,7 @@ def main():
         data,
         original_dim=(current_size, current_size, 3),
     )
-    elbo, optimize, merged, images, bpp, mse = compressor.tensors()
+    elbo, optimize, merged, images, bpp, mse, psnr = compressor.tensors()
 
     print_params()
 
@@ -357,7 +370,8 @@ def main():
                     current_size,
                     3,
                 ))
-                elbo, optimize, merged, images, bpp, mse = compressor.tensors()
+                elbo, optimize, merged, images, bpp, mse, psnr = compressor.tensors(
+                )
                 initialize_uninitialized(sess)
                 sess.run(
                     initializers,
@@ -374,8 +388,8 @@ def main():
                     use_train_data: False,
                 }
 
-            test_mse, test_bpp, summary, images_summary = sess.run([
-                mse, bpp, merged, images
+            test_mse, test_psnr, test_bpp, summary, images_summary = sess.run([
+                mse, psnr, bpp, merged, images
             ], feed)
             test_writer.add_summary(summary, FLAGS.train_steps * epoch)
             test_writer.add_summary(images_summary, FLAGS.train_steps * epoch)
@@ -435,6 +449,7 @@ def main():
                 f'Epoch: {epoch} '
                 f'mse: {test_mse:.6f} '
                 f'bpp: {test_bpp:.6f} '
+                f'psnr: {test_psnr:.6f} '
                 f'time elapsed: {time.time() - start_time:.3f} seconds '
             )
 
