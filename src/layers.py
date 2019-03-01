@@ -90,19 +90,19 @@ class LatentDistribution(tf.keras.layers.Layer):
         with summary.SummaryScope('latent_distributions') as scope:
             categorical = self.add_weight(
                 name='categorical_distribution',
-                shape=[FLAGS.categorical_dims],
+                shape=[FLAGS.hidden_dims, FLAGS.categorical_dims],
                 trainable=True,
             )
             categorical = tf.nn.softmax(categorical)
             loc = self.add_weight(
                 name='logistic_loc_variables',
-                shape=[FLAGS.categorical_dims],
+                shape=[FLAGS.hidden_dims, FLAGS.categorical_dims],
                 trainable=True,
             )
             scale = tf.nn.softplus(
                 self.add_weight(
                     name='logistic_scale_variables',
-                    shape=[FLAGS.categorical_dims],
+                    shape=[FLAGS.hidden_dims, FLAGS.categorical_dims],
                     trainable=True,
                 )
             )
@@ -125,9 +125,9 @@ class LatentDistribution(tf.keras.layers.Layer):
 
         stopped_latents = scale_gradient(latent)
         likelihoods = self._distribution.cdf(
-            tf.clip_by_value(stopped_latents + 0.5 / 255.0, 0.0, 1.0)
+            tf.clip_by_value(stopped_latents + 0.5 / 255.0, -1.0, 1.0)
         ) - self._distribution.cdf(
-            tf.clip_by_value(stopped_latents - 0.5 / 255.0, 0.0, 1.0)
+            tf.clip_by_value(stopped_latents - 0.5 / 255.0, -1.0, 1.0)
         )
 
         return likelihoods
