@@ -20,6 +20,22 @@ tf.reset_default_graph()
 MIN_SIZE = 8
 
 
+def reuse_layer(scope_name, layer_func):
+
+    templates = [
+        layer_func(),
+        layer_func(),
+    ]
+
+    def res(size, input):
+        if size <= MIN_SIZE:
+            return templates[0](input)
+        else:
+            return templates[1](input)
+
+    return res
+
+
 def make_template(scope_name, layer_func):
 
     template = tf.make_template(scope_name, layer_func())
@@ -71,21 +87,22 @@ class Compressor:
 
     def __init__(self, data, original_dim):
         self.data, self.test = data
-        self.image_summary_idx = tf.random_uniform(
-            [10],
-            minval=0,
-            maxval=tf.shape(data, out_type=tf.int32)[0],
-            dtype=tf.int32,
-        )
-        self.build_reused_layers()
-        self.new_original_dim(original_dim)
+        with tf.variable_scope('network', reuse=tf.AUTO_REUSE):
+            self.image_summary_idx = tf.random_uniform(
+                [10],
+                minval=0,
+                maxval=tf.shape(data, out_type=tf.int32)[0],
+                dtype=tf.int32,
+            )
+            self.build_reused_layers()
+            self.new_original_dim(original_dim)
 
     def new_original_dim(self, original_dim):
         self.original_dim = original_dim
-        with summary.SummaryScope('network') as scope:
-            _, self.images, self.outputs = self.build(
-                self.data, original_dim[0]
-            )
+        _, self.images, self.outputs = self.build(
+            self.data,
+            original_dim[0],
+        )
         self.build_losses()
 
     def build(self, input, size):
@@ -105,9 +122,11 @@ class Compressor:
                 print(f'downsample: {pooled_input.shape}')
 
             pooled_output, images, outputs = self.build(pooled_input, size // 2)
-            predicted_output = tf.image.resize_bilinear(
-                pooled_output, [size, size]
-            )
+
+            with tf.variable_scope(f'size_{size}', reuse=tf.AUTO_REUSE):
+                predicted_output = tf.image.resize_bilinear(
+                    pooled_output, 2 * tf.shape(pooled_output)[1:3]
+                )
             if FLAGS.debug >= 1:
                 print(f'upsample: {predicted_output.shape}')
             residual = input - predicted_output
@@ -151,7 +170,7 @@ class Compressor:
         if not FLAGS.reuse:
             template = no_reuse
         else:
-            template = make_template
+            template = reuse_layer
 
         self.encoder = template(
                 'encoder',
@@ -353,7 +372,7 @@ def main():
         print('Running ops')
 
         resize_times = {
-            size: 2**(i + 5)
+            size: 2**(i + 4)
             for i, size in enumerate(FLAGS.increment_size_intervals)
         }
 

@@ -74,7 +74,7 @@ def post_setup():
 
 
 def int_or_none(value):
-    if value is None:
+    if value == 'None':
         return None
     else:
         return int(value)

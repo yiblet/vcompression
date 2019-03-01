@@ -5,4 +5,4 @@ cd "$(dirname "$0")" || (
     exit
 )
 
-pip install -e compression
+pip3 install -e compression
