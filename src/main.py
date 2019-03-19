@@ -236,22 +236,22 @@ class Compressor:
             train_bpp = tf.reduce_mean(expected_bits_per_image)
             train_bpp /= -np.log(2) * num_pixels
 
-            train_mse = tf.reduce_mean(
-                1 - tf.image.ssim(
-                    self.outputs[-1]['output'],
-                    self.outputs[-1]['input'],
-                    1.0,
-                )
-            ) / 2.0
+            # train_mse = tf.reduce_mean(
+            #     tf.losses.mean_squared_error(
+            #         self.outputs[-1]['output'],
+            #         self.outputs[-1]['input'],
+            #         1.0,
+            #     )
+            # )
 
-            # train_mse = tf.reduce_sum([
-            #     tf.reduce_mean(
-            #         tf.squared_difference(
-            #             layer['input'],
-            #             layer['output'],
-            #         )
-            #     ) for idx, layer in enumerate(self.outputs[:])
-            # ])
+            train_mse = tf.reduce_sum([
+                tf.reduce_mean(
+                    tf.squared_difference(
+                        layer['input'],
+                        layer['output'],
+                    )
+                ) for idx, layer in enumerate(self.outputs[-1:])
+            ])
 
             train_mse *= 255**2 / num_pixels
             train_loss = train_mse * 0.05 + train_bpp
