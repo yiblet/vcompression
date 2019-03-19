@@ -34,6 +34,11 @@ FLAGS = Namespace(is_set=False)
 
 
 def post_setup():
+    FLAGS._revision = subprocess.run(
+        'git rev-parse HEAD'.split(' '),
+        stdout=subprocess.PIPE,
+    ).stdout.decode('ascii').strip()
+
     if not FLAGS.local:
         import atexit
         import tensorflow as tf

@@ -20,6 +20,18 @@ tf.reset_default_graph()
 MIN_SIZE = 8
 
 
+def subset(keys, dictionary):
+    return {key: dictionary[key] for key in keys if key in dictionary}
+
+
+def in_categories(prefixes, dictionary):
+    return {
+        key: dictionary[key]
+        for key in dictionary.keys()
+        if any(key.startswith(prefix) for prefix in prefixes)
+    }
+
+
 def reuse_layer(scope_name, layer_func):
 
     templates = [
@@ -85,6 +97,12 @@ def initialize_uninitialized(sess):
 
 class Compressor:
 
+    METRICS = 'metrics'
+    TRAIN = 'train'
+    SUMMARIES = 'summary'
+
+    DATA = 'summary/data'
+
     def __init__(self, data, original_dim):
         self.data, self.test = data
         with tf.variable_scope('network', reuse=tf.AUTO_REUSE):
@@ -96,6 +114,17 @@ class Compressor:
             )
             self.build_reused_layers()
             self.new_original_dim(original_dim)
+
+    def tensors(self):
+        return {
+            'metrics/loss': self.train_loss,
+            'train/op': self.train_op,
+            'summary/data': self.merged,
+            'summary/images': self.images_summary,
+            'metrics/bpp': self.train_bpp,
+            'metrics/mse': self.train_psnr,
+            'metrics/psnr': self.train_psnr,
+        }
 
     def new_original_dim(self, original_dim):
         self.original_dim = original_dim
@@ -250,17 +279,6 @@ class Compressor:
         self.train_mse = train_mse
         self.train_psnr = train_psnr
 
-    def tensors(self):
-        return (
-            self.train_loss,
-            self.train_op,
-            self.merged,
-            self.images_summary,
-            self.train_bpp,
-            self.train_mse,
-            self.train_psnr,
-        )
-
 
 def clean_log_directories():
     if tf.gfile.Exists(FLAGS.summaries_dir):
@@ -335,7 +353,7 @@ def main():
         data,
         original_dim=(current_size, current_size, 3),
     )
-    elbo, optimize, merged, images, bpp, mse, psnr = compressor.tensors()
+    tensors = compressor.tensors()
 
     print_params()
 
@@ -389,8 +407,7 @@ def main():
                     current_size,
                     3,
                 ))
-                elbo, optimize, merged, images, bpp, mse, psnr = compressor.tensors(
-                )
+                tensors = compressor.tensors()
                 initialize_uninitialized(sess)
                 sess.run(
                     initializers,
@@ -407,11 +424,19 @@ def main():
                     use_train_data: False,
                 }
 
-            test_mse, test_psnr, test_bpp, summary, images_summary = sess.run([
-                mse, psnr, bpp, merged, images
-            ], feed)
-            test_writer.add_summary(summary, FLAGS.train_steps * epoch)
-            test_writer.add_summary(images_summary, FLAGS.train_steps * epoch)
+            test_output = sess.run(
+                in_categories([Compressor.METRICS, Compressor.SUMMARIES],
+                              tensors),
+                feed,
+            )
+            test_writer.add_summary(
+                test_output[Compressor.DATA],
+                FLAGS.train_steps * epoch,
+            )
+            test_writer.add_summary(
+                test_output['summary/images'],
+                FLAGS.train_steps * epoch,
+            )
 
             # training step
             for train_step in range(FLAGS.train_steps):
@@ -426,32 +451,54 @@ def main():
                     }
 
                 global_step = FLAGS.train_steps * epoch + train_step
+
                 if global_step == 0:
                     run_options = tf.RunOptions(
                         trace_level=tf.RunOptions.FULL_TRACE
                     )
                     run_metadata = tf.RunMetadata()
-                    train_mse, train_bpp, _, summary = sess.run(
-                        [mse, bpp, optimize, merged],
+                    train_output = sess.run(
+                        in_categories(
+                            [
+                                Compressor.METRICS,
+                                Compressor.TRAIN,
+                                Compressor.DATA,
+                            ],
+                            tensors,
+                        ),
                         feed,
                         options=run_options,
                         run_metadata=run_metadata,
                     )
-                    train_writer.add_summary(summary, global_step)
+                    train_writer.add_summary(
+                        train_output[Compressor.DATA], global_step
+                    )
                     train_writer.add_run_metadata(
                         run_metadata,
                         f'step {global_step}',
                         global_step=global_step
                     )
                 elif train_step % FLAGS.summary_frequency == 0:
-                    train_mse, train_bpp, _, summary = sess.run(
-                        [mse, bpp, optimize, merged],
+                    train_output = sess.run(
+                        in_categories(
+                            [
+                                Compressor.METRICS,
+                                Compressor.TRAIN,
+                                Compressor.DATA,
+                            ],
+                            tensors,
+                        ),
                         feed,
                     )
-                    train_writer.add_summary(summary, global_step)
+                    train_writer.add_summary(
+                        train_output[Compressor.DATA], global_step
+                    )
                 else:
-                    train_mse, train_bpp, _ = sess.run(
-                        [mse, bpp, optimize],
+                    train_output = sess.run(
+                        in_categories(
+                            [Compressor.METRICS, Compressor.TRAIN],
+                            tensors,
+                        ),
                         feed,
                     )
 
@@ -459,16 +506,16 @@ def main():
                     print(
                         f'Epoch: {epoch} '
                         f'step: {train_step} '
-                        f'train mse: {train_mse:.5f} '
-                        f'train bpp: {train_bpp:.5f} ',
+                        f'train mse: {train_output["metrics/mse"]:.5f} '
+                        f'train bpp: {train_output["metrics/bpp"]:.5f} ',
                         end='\r'
                     )
 
             print(
                 f'Epoch: {epoch} '
-                f'mse: {test_mse:.6f} '
-                f'bpp: {test_bpp:.6f} '
-                f'psnr: {test_psnr:.6f} '
+                f'mse: {test_output["metrics/mse"]:.6f} '
+                f'bpp: {test_output["metrics/bpp"]:.6f} '
+                f'psnr: {test_output["metrics/psnr"]:.6f} '
                 f'time elapsed: {time.time() - start_time:.3f} seconds '
             )
 
