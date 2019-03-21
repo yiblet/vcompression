@@ -95,7 +95,7 @@ def initialize_uninitialized(sess):
         sess.run(tf.variables_initializer(not_initialized_vars))
 
 
-class Compressor:
+class Compressor(object):
 
     METRICS = 'metrics'
     TRAIN = 'train'
@@ -526,6 +526,7 @@ def main():
                 f'mse: {test_output["metrics/mse"]:.6f} '
                 f'bpp: {test_output["metrics/bpp"]:.6f} '
                 f'psnr: {test_output["metrics/psnr"]:.6f} '
+                f'psnr/pp: {test_output["metrics/psnr"] / test_output["metrics/bpp"] :.6f} '
                 f'time elapsed: {time.time() - start_time:.3f} seconds '
             )
 
