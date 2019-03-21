@@ -124,6 +124,7 @@ class Compressor(object):
             'metrics/bpp': self.train_bpp,
             'metrics/mse': self.train_mse,
             'metrics/psnr': self.train_psnr,
+            'metrics/ssim': self.train_ssim,
         }
 
     def new_original_dim(self, original_dim):
@@ -236,13 +237,13 @@ class Compressor(object):
             train_bpp = tf.reduce_mean(expected_bits_per_image)
             train_bpp /= -np.log(2) * num_pixels
 
-            # train_mse = tf.reduce_mean(
-            #     tf.losses.mean_squared_error(
-            #         self.outputs[-1]['output'],
-            #         self.outputs[-1]['input'],
-            #         1.0,
-            #     )
-            # )
+            train_ssim = tf.reduce_mean(
+                1 - tf.image.ssim(
+                    self.outputs[-1]['output'],
+                    self.outputs[-1]['input'],
+                    1.0,
+                )
+            ) / 2.0
 
             train_mse = tf.reduce_sum([
                 tf.reduce_mean(
@@ -254,7 +255,11 @@ class Compressor(object):
             ])
 
             train_mse *= 255**2 / num_pixels
-            train_loss = train_mse * 0.05 + train_bpp
+
+            if FLAGS.use_ssim:
+                train_loss = train_ssim * 0.05 + train_bpp
+            else:
+                train_loss = train_mse * 0.05 + train_bpp
 
             train_psnr = tf.reduce_mean(
                 tf.image.psnr(
@@ -268,6 +273,7 @@ class Compressor(object):
             scope['mse'] = train_mse
             scope['loss'] = train_loss
             scope['psnr'] = train_psnr
+            scope['ssim'] = train_ssim
 
         train_op = tf.train.AdamOptimizer(FLAGS.learning_rate) \
             .minimize(train_loss)
@@ -288,6 +294,7 @@ class Compressor(object):
         self.train_bpp = train_bpp
         self.train_mse = train_mse
         self.train_psnr = train_psnr
+        self.train_ssim = train_ssim
 
 
 def clean_log_directories():
@@ -524,6 +531,7 @@ def main():
             print(
                 f'Epoch: {epoch} '
                 f'mse: {test_output["metrics/mse"]:.6f} '
+                f'ssim: {test_output["metrics/ssim"]:.6f} '
                 f'bpp: {test_output["metrics/bpp"]:.6f} '
                 f'psnr: {test_output["metrics/psnr"]:.6f} '
                 f'psnr/bpp: {test_output["metrics/psnr"] / test_output["metrics/bpp"] :.6f} '
