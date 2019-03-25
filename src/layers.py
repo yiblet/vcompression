@@ -23,24 +23,32 @@ class Downsampler(tf.keras.layers.Layer):
 
     def build(self, input_shape):
 
-        self.std = self.add_weight(
-            'std',
-            shape=[int(input_shape[-1])],
-            trainable=True,
-        )
-        scale = tf.nn.relu(self.std) + 1e-6
+        with summary.SummaryScope(self.name) as scope:
+            self.std = self.add_weight(
+                'std',
+                shape=[int(input_shape[-1])],
+                trainable=True,
+            )
+            scale = tf.nn.relu(self.std) + 1e-6
 
-        dist = tfp.distributions.Normal(loc=tf.zeros_like(scale), scale=scale)
-        vals = dist.prob(
-            tf.range(start=-self.size, limit=self.size + 1,
-                     dtype=tf.float32)[:, tf.newaxis]
-        )
+            dist = tfp.distributions.Normal(
+                loc=tf.zeros_like(scale), scale=scale
+            )
+            vals = dist.prob(
+                tf.range(
+                    start=-self.size,
+                    limit=self.size + 1,
+                    dtype=tf.float32,
+                )[:, tf.newaxis]
+            )
 
-        gauss_kernel = vals[:, tf.newaxis, :] * vals[tf.newaxis, :, :]
+            gauss_kernel = vals[:, tf.newaxis, :] * vals[tf.newaxis, :, :]
 
-        gauss_kernel /= tf.reduce_sum(gauss_kernel, axis=[0, 1])
+            gauss_kernel /= tf.reduce_sum(gauss_kernel, axis=[0, 1])
 
-        self.gauss_kernel = gauss_kernel[:, :, :, tf.newaxis]
+            self.gauss_kernel = gauss_kernel[:, :, :, tf.newaxis]
+
+            scope['std'] = std
 
     def call(self, input):
 

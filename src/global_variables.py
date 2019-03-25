@@ -314,7 +314,7 @@ def define_flags(additional_flags=None, modify_parser=None, args=None):
 
     parser.add_argument(
         '-gaussian_kernel_width',
-        default=2,
+        default=3,
         type=int,
     )
 
