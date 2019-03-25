@@ -22,6 +22,15 @@ def test_decoder(capsys):
         layers.Decoder(32)(input)
 
 
+def test_downsampler(capsys):
+    with capsys.disabled():
+        define_additional_flags()
+        pprint.pprint(FLAGS.__dict__)
+        input = tf.placeholder(tf.float32, [None, 4, 4, 3])
+        output = layers.Downsampler(3)(input)
+        print(output.shape)
+
+
 # def test_build(capsys):
 #     with capsys.disabled():
 #         define_additional_flags()

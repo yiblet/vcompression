@@ -146,8 +146,7 @@ class Compressor(object):
                 print(f'input: {residual.shape}')
         else:
             # recursive case
-            # TODO: CHANGE THIS TO SMOOTH DOWN SAMPLING
-            pooled_input = tf.keras.layers.AvgPool2D()(input)
+            pooled_input = self.downsampler(size, input)
 
             if FLAGS.debug >= 1:
                 print(f'downsample: {pooled_input.shape}')
@@ -209,9 +208,9 @@ class Compressor(object):
             'decoder',
             lambda: layers.Decoder(FLAGS.channel_dims),
         )
-        self.upsampler = template(
-            'upsampler',
-            lambda: layers.Upsampler(FLAGS.channel_dims),
+        self.downsampler = template(
+            'downsampler',
+            lambda: layers.Downsampler(FLAGS.gaussian_kernel_width),
         )
 
         self.likelihoods = template(
@@ -441,8 +440,10 @@ def main():
                 }
 
             test_output = sess.run(
-                in_categories([Compressor.METRICS, Compressor.SUMMARIES],
-                              tensors),
+                in_categories(
+                    [Compressor.METRICS, Compressor.SUMMARIES],
+                    tensors,
+                ),
                 feed,
             )
             test_writer.add_summary(
@@ -487,7 +488,8 @@ def main():
                         run_metadata=run_metadata,
                     )
                     train_writer.add_summary(
-                        train_output[Compressor.DATA], global_step
+                        train_output[Compressor.DATA],
+                        global_step,
                     )
                     train_writer.add_run_metadata(
                         run_metadata,

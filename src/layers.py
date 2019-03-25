@@ -15,45 +15,41 @@ def scale_gradient(input):
     return input, grad
 
 
-class SpectralNorm(tf.keras.constraints.Constraint):
+class Downsampler(tf.keras.layers.Layer):
 
-    def __init__(self, iteration=1):
-        self.iteration = iteration
-        self.u = tf.get_variable(
-            "u", [1, w_shape[-1]],
-            initializer=tf.random_normal_initializer(),
-            trainable=False
+    def __init__(self, size, **kwargs):
+        super().__init__(self, **kwargs)
+        self.size = size
+
+    def build(self, input_shape):
+
+        self.std = self.add_weight(
+            'std',
+            shape=[int(input_shape[-1])],
+            trainable=True,
+        )
+        scale = tf.nn.relu(self.std) + 1e-6
+
+        dist = tfp.distributions.Normal(loc=tf.zeros_like(scale), scale=scale)
+        vals = dist.prob(
+            tf.range(start=-self.size, limit=self.size + 1,
+                     dtype=tf.float32)[:, tf.newaxis]
         )
 
-    def __call__(self, w):
-        w_shape = w.shape.as_list()
-        w = tf.reshape(w, [-1, w_shape[-1]])
+        gauss_kernel = vals[:, tf.newaxis, :] * vals[tf.newaxis, :, :]
 
-        u_hat = self.u
-        v_hat = None
-        for i in range(self.iteration):
-            v_ = tf.matmul(u_hat, tf.transpose(w))
-            v_hat = tf.nn.l2_normalize(v_)
+        gauss_kernel /= tf.reduce_sum(gauss_kernel, axis=[0, 1])
 
-            u_ = tf.matmul(v_hat, w)
-            u_hat = tf.nn.l2_normalize(u_)
+        self.gauss_kernel = gauss_kernel[:, :, :, tf.newaxis]
 
-        u_hat = tf.stop_gradient(u_hat)
-        v_hat = tf.stop_gradient(v_hat)
+    def call(self, input):
 
-        sigma = tf.matmul(tf.matmul(v_hat, w), tf.transpose(u_hat))
-
-        with tf.control_dependencies([self.u.assign(u_hat)]):
-            w_norm = w / sigma
-            w_norm = tf.reshape(w_norm, w_shape)
-
-        return w_norm
-
-    def get_config(self):
-        return {
-            "iteration": self.iteration,
-            "u": self.u,
-        }
+        return tf.nn.depthwise_conv2d(
+            input,
+            self.gauss_kernel,
+            strides=[1, 1, 1, 1],
+            padding="SAME",
+        )[:, ::2, ::2, :]
 
 
 class Quantizer(tf.keras.layers.Layer):
