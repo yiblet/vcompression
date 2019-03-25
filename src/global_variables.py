@@ -319,6 +319,12 @@ def define_flags(additional_flags=None, modify_parser=None, args=None):
     )
 
     parser.add_argument(
+        '-use_batch_norm',
+        default=True,
+        type=boolean_string,
+    )
+
+    parser.add_argument(
         '-data',
         default=default_data,
         type=str,

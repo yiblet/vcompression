@@ -1,4 +1,3 @@
-# @title The Big File { display-mode: "form" }
 from __future__ import absolute_import
 import shutil
 import pprint
@@ -103,8 +102,9 @@ class Compressor(object):
 
     DATA = 'summary/data'
 
-    def __init__(self, data, original_dim):
+    def __init__(self, data, training, original_dim):
         self.data, self.test = data
+        self.training = training
         with tf.variable_scope('network', reuse=tf.AUTO_REUSE):
             self.image_summary_idx = tf.random_uniform(
                 [10],
@@ -201,12 +201,12 @@ class Compressor(object):
             template = reuse_layer
 
         self.encoder = template(
-                'encoder',
-                lambda: layers.Encoder(FLAGS.channel_dims, FLAGS.hidden_dims,)
+            'encoder',
+            lambda: layers.Encoder(FLAGS.channel_dims, FLAGS.hidden_dims, self.training)
         )
         self.decoder = template(
             'decoder',
-            lambda: layers.Decoder(FLAGS.channel_dims),
+            lambda: layers.Decoder(FLAGS.channel_dims, self.training),
         )
         self.downsampler = template(
             'downsampler',
@@ -366,6 +366,7 @@ def main():
 
     compressor = Compressor(
         data,
+        use_train_data,
         original_dim=(current_size, current_size, 3),
     )
     tensors = compressor.tensors()
