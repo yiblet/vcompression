@@ -70,7 +70,8 @@ def large_image_input_fn(test=False, crop_size=None):
 
     return dataset.repeat().map(parse_image).filter(
         is_large_image,
-    ).map(reshape).batch(FLAGS.batch_size).prefetch(FLAGS.prefetch)
+    ).map(reshape).shuffle(100 * FLAGS.batch_size
+                          ).batch(FLAGS.batch_size).prefetch(FLAGS.prefetch)
 
 
 def unpickle(file):
