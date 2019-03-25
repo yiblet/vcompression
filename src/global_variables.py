@@ -91,7 +91,7 @@ def boolean_string(s):
     return s == 'True'
 
 
-def define_flags(additional_flags=None, modify_parser=None):
+def define_flags(additional_flags=None, modify_parser=None, args=None):
     reset = False    # @param {type: "boolean"}
     if (not reset) and FLAGS.is_set:
         return
@@ -367,7 +367,7 @@ def define_flags(additional_flags=None, modify_parser=None):
         type=boolean_string,
     )
 
-    parser.parse_args(namespace=FLAGS)
+    parser.parse_args(args=args, namespace=FLAGS)
 
     if additional_flags is not None:
         FLAGS.bulk_update(additional_flags)

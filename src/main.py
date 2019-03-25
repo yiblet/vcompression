@@ -129,7 +129,7 @@ class Compressor(object):
 
     def new_original_dim(self, original_dim):
         self.original_dim = original_dim
-        _, self.images, self.outputs = self.build(
+        _, _, self.images, self.outputs = self.build(
             self.data,
             original_dim[0],
         )
@@ -146,17 +146,16 @@ class Compressor(object):
                 print(f'input: {residual.shape}')
         else:
             # recursive case
+            # TODO: CHANGE THIS TO SMOOTH DOWN SAMPLING
             pooled_input = tf.keras.layers.AvgPool2D()(input)
 
             if FLAGS.debug >= 1:
                 print(f'downsample: {pooled_input.shape}')
 
-            pooled_output, images, outputs = self.build(pooled_input, size // 2)
+            pooled_output, predicted_output, images, outputs = self.build(
+                pooled_input, size // 2
+            )
 
-            with tf.variable_scope(f'size_{size}', reuse=tf.AUTO_REUSE):
-                predicted_output = tf.image.resize_bilinear(
-                    pooled_output, 2 * tf.shape(pooled_output)[1:3]
-                )
             if FLAGS.debug >= 1:
                 print(f'upsample: {predicted_output.shape}')
             residual = input - predicted_output
@@ -166,7 +165,7 @@ class Compressor(object):
             print(f'encoded: {latent.shape}')
         latent = layers.Quantizer()(latent)
 
-        decoded = self.decoder(size, latent)
+        decoded, upsampled = self.decoder(size, latent)
 
         if size <= MIN_SIZE:    # TODO make this a flag
             output = tf.nn.relu(decoded)
@@ -194,7 +193,7 @@ class Compressor(object):
 
         if FLAGS.debug >= 1:
             print(f'decoded: {output.shape}')
-        return (output, images, outputs)
+        return (output, upsampled, images, outputs)
 
     def build_reused_layers(self):
         if not FLAGS.reuse:
@@ -235,7 +234,7 @@ class Compressor(object):
             )
 
             train_bpp = tf.reduce_mean(expected_bits_per_image)
-            train_bpp /= -np.log(2) * num_pixels
+            train_bpp /= (-np.log(2) * num_pixels)
 
             train_ssim = tf.reduce_mean(
                 1 - tf.image.ssim(

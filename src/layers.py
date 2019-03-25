@@ -156,9 +156,9 @@ class ResidualBlock(tf.keras.Model):
         if not isinstance(activation, list):
             activation = [activation, activation]
         self.activation = activation
-        self.build(None)
+        self.init()
 
-    def build(self, _):
+    def init(self):
         if FLAGS.disable_residual_block:
             return
 
@@ -318,9 +318,18 @@ class Decoder(SummaryModel):
             self.activation = tf.keras.layers.Activation('tanh')
         else:
             raise ValueError('unsupported activation')
-        self.build(None)
+        self.init()
 
-    def build(self, input_shape):
+    def init(self):
+        self.model_last = tf.layers.Conv2DTranspose(
+            3,
+            [2, 2],
+            [1, 1],
+            name='deconv_to_image',
+            activation=None,
+            padding='same',
+        )
+
         self.model_layers = [
             tf.layers.Conv2DTranspose(
                 self.channels,
@@ -364,16 +373,42 @@ class Decoder(SummaryModel):
                 activation=self.activation,
                 use_batch_norm=False,
             ),
-            tf.layers.Conv2DTranspose(
-                3,
-                [2, 2],
-                [1, 1],
-                name='deconv_6',
-                activation=None,
-                padding='same',
-            ),
+            self.model_last,
         ]
-        super().build(input_shape)
+
+        self.model_upsize = [
+            tf.layers.Conv2DTranspose(
+                self.channels,
+                [2, 2],
+                [2, 2],
+                name='deconv_upsize',
+                activation=None,
+            ),
+            self.activation,
+            ResidualBlock(
+                self.channels,
+                kernel=[2, 2],
+                activation=self.activation,
+                use_batch_norm=False,
+            ),
+            self.model_last,
+        ]
+
+    def call(self, input):
+        with summary.SummaryScope(self.name) as scope:
+            scope['input'] = input
+            layers = scope.sequential(
+                input,
+                self.model_layers,
+                interior_layers=True,
+            )
+            output = layers[-1]
+            internal = layers[-2]
+
+        with summary.SummaryScope(self.name + "_upsize") as scope:
+            upsize = scope.sequential(internal, self.model_upsize)
+
+        return output, upsize
 
 
 class Upsampler(SummaryModel):

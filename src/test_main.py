@@ -2,17 +2,28 @@ from __future__ import absolute_import
 
 from global_variables import *
 import main
+import layers
+import pprint
+import tensorflow as tf
 
 
 def define_additional_flags():
-    FLAGS = Namespace()
-    FLAGS.debug = True
-    FLAGS.local = True
-    main.define_flags(additional_flags=FLAGS)
+    flags = Namespace()
+    flags.debug = 2
+    flags.local = True
+    define_flags(args=[], additional_flags=flags)
 
 
-def test_build(capsys):
+def test_decoder(capsys):
     with capsys.disabled():
         define_additional_flags()
-        main.construct_vae(tf.placeholder(tf.float32, [None, *DIM]), DIM)
-        main.print_params()
+        pprint.pprint(FLAGS.__dict__)
+        input = tf.placeholder(tf.float32, [None, 4, 4, 32])
+        layers.Decoder(32)(input)
+
+
+# def test_build(capsys):
+#     with capsys.disabled():
+#         define_additional_flags()
+#         main.construct_vae(tf.placeholder(tf.float32, [None, *DIM]), DIM)
+#         main.print_params()

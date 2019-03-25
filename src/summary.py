@@ -43,7 +43,10 @@ class SummaryScope(dict):
        that also logs all tensors that are put into the scope dict'''
 
     def __init__(
-        self, scope_name, silent=False, collection=DEFAULT_SUMMARY_COLLECTION
+        self,
+        scope_name,
+        silent=False,
+        collection=DEFAULT_SUMMARY_COLLECTION,
     ):
         super()
         self.scope_name = scope_name
@@ -56,7 +59,13 @@ class SummaryScope(dict):
         name = name[name.rindex('/') + 1:]
         return name
 
-    def sequential(self, input, ops, include_input=False):
+    def sequential(
+        self,
+        input,
+        ops,
+        include_input=False,
+        interior_layers=False,
+    ):
         prev_op = input
 
         if FLAGS.debug >= 2:
@@ -68,8 +77,15 @@ class SummaryScope(dict):
                 print(f'{name}: {prev_op.shape}')
             self[name] = prev_op
 
+        layers = []
+
         for operation in ops:
+            prev_prev_op = prev_op
             prev_op = operation(prev_op)
+            if prev_prev_op == prev_op:
+                continue
+
+            layers.append(prev_op)
             name = self._get_name(prev_op.name)
             if FLAGS.debug >= 2:
                 print(f'{name}: {prev_op.shape}')
@@ -80,7 +96,7 @@ class SummaryScope(dict):
         if FLAGS.debug >= 2:
             print('')
 
-        return prev_op
+        return layers if interior_layers else prev_op
 
     def __enter__(self):
         self.scope = tf.name_scope(self.scope_name)
