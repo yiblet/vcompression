@@ -193,12 +193,6 @@ def define_flags(additional_flags=None, modify_parser=None, args=None):
     )
 
     parser.add_argument(
-        '-tunnel_loc',
-        default='yiblet',
-        type=str,
-    )
-
-    parser.add_argument(
         '-holdout_size',
         default=200,
         type=int,
@@ -227,9 +221,10 @@ def define_flags(additional_flags=None, modify_parser=None, args=None):
     )
 
     parser.add_argument(
-        '-crop_size',
-        default=32,
+        '-min_size',
+        default=16,
         type=int,
+        help='minimum pixel block width',
     )
 
     parser.add_argument(

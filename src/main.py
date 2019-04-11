@@ -16,8 +16,6 @@ import time
 
 tf.reset_default_graph()
 
-MIN_SIZE = 8
-
 
 def subset(keys, dictionary):
     return {key: dictionary[key] for key in keys if key in dictionary}
@@ -39,7 +37,7 @@ def reuse_layer(scope_name, layer_func):
     ]
 
     def res(size, input):
-        if size <= MIN_SIZE:
+        if size <= FLAGS.min_size:
             return templates[0](input)
         else:
             return templates[1](input)
@@ -52,7 +50,7 @@ def make_template(scope_name, layer_func):
     template = tf.make_template(scope_name, layer_func())
 
     def res(size, input):
-        if size > MIN_SIZE:
+        if size > FLAGS.min_size:
             return template(input)
         else:
             with tf.name_scope("first_" + scope_name):
@@ -137,7 +135,7 @@ class Compressor(object):
 
     def build(self, input, size):
         '''recursively builds residual autoencoder'''
-        if size <= MIN_SIZE:    # TODO make this a flag
+        if size <= FLAGS.min_size:
             images = []
             outputs = []
             residual = input
@@ -166,7 +164,7 @@ class Compressor(object):
 
         decoded, upsampled = self.decoder(size, latent)
 
-        if size <= MIN_SIZE:    # TODO make this a flag
+        if size <= FLAGS.min_size:
             output = tf.nn.relu(decoded)
         else:
             output = tf.nn.relu(decoded + predicted_output)
@@ -356,7 +354,7 @@ def main():
     print('--------------')
 
     if FLAGS.fixed_size is None:
-        current_size = MIN_SIZE
+        current_size = FLAGS.min_size
     else:
         current_size = FLAGS.fixed_size
 

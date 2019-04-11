@@ -335,11 +335,26 @@ class Encoder(SummaryModel, HasBatchNorm, HasActivation):
                 activation=self.activation_type,
             ),
             tf.layers.Conv2D(
+                self.channels,
+                [2, 2],
+                [2, 2],
+                name='conv_4',
+                activation=None,
+            ),
+            self.batch_norm(),
+            self.activation(),
+            ResidualBlock(
+                self.channels,
+                self.training,
+                kernel=[2, 2],
+                activation=self.activation_type,
+            ),
+            tf.layers.Conv2D(
                 self.hidden,
                 [2, 2],
                 [1, 1],
                 padding='same',
-                name='conv_4',
+                name='conv_5',
                 activation=tf.nn.sigmoid,
             ),
         ]
@@ -373,6 +388,21 @@ class Decoder(SummaryModel, HasBatchNorm, HasActivation):
         )
 
         self.model_layers = [
+            tf.layers.Conv2DTranspose(
+                self.channels,
+                [2, 2],
+                [2, 2],
+                name='deconv_2',
+                activation=None,
+            ),
+            self.batch_norm(),
+            self.activation(),
+            ResidualBlock(
+                self.channels,
+                self.training,
+                kernel=[2, 2],
+                activation=self.activation_type,
+            ),
             tf.layers.Conv2DTranspose(
                 self.channels,
                 [2, 2],
