@@ -283,12 +283,7 @@ def define_flags(additional_flags=None, modify_parser=None, args=None):
         default_tpu_address = None
         print('running locally')
     else:
-        try:
-            print('mounting google drive')
-            from google.colab import auth
-            auth.authenticate_user()
-        except ImportError:
-            print('mounting failed')
+        print('remember to authenticate the user')
 
         default_data = '/gdrive/My Drive/cifar10'
         default_large_image_dir = f'{default_bucket}/images'
