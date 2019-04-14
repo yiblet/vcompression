@@ -365,7 +365,7 @@ class Encoder(SummaryModel, HasBatchNorm, HasActivation):
                 [1, 1],
                 padding='same',
                 name='conv_5',
-                activation=tf.nn.sigmoid,
+                activation=None,
             ),
         ]
 
@@ -390,7 +390,7 @@ class Decoder(SummaryModel, HasBatchNorm, HasActivation):
     def init(self):
         self.model_last = tf.layers.Conv2DTranspose(
             3,
-            [2, 2],
+            [5, 5],
             [1, 1],
             name='deconv_to_image',
             activation=None,
@@ -468,9 +468,10 @@ class Decoder(SummaryModel, HasBatchNorm, HasActivation):
         self.model_upsize = [
             tf.layers.Conv2DTranspose(
                 self.channels,
-                [2, 2],
+                [5, 5],
                 [2, 2],
                 name='deconv_upsize',
+                padding='same',
                 activation=None,
             ),
             self.batch_norm(),
