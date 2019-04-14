@@ -105,13 +105,14 @@ class Quantizer(tf.keras.layers.Layer):
 
         @tf.custom_gradient
         def quantizer(latent):
-            expand = latent * 255.0
-            expand = tf.clip_by_value(expand, 0, 255)
+            values = 2**FLAGS.quantization_bits - 1.0
+            expand = latent * values
+            expand = tf.clip_by_value(expand, 0, values)
             expand = tf.round(expand)
-            expand /= 255.0
+            expand /= values
 
             def grad(dy):
-                return dy * (1 - tf.cos(255.0 * np.pi * latent))
+                return dy
 
             return expand, grad
 
@@ -171,10 +172,11 @@ class LatentDistribution(tf.keras.layers.Layer):
         else:
             stopped_latents = scale_gradient(latent)
 
+        values = 2**FLAGS.quantization_bits - 1.0
         likelihoods = self._distribution.cdf(
-            tf.clip_by_value(stopped_latents + 0.5 / 255.0, -1.0, 1.0)
+            tf.clip_by_value(stopped_latents + 0.5 / values, -1.0, 1.0)
         ) - self._distribution.cdf(
-            tf.clip_by_value(stopped_latents - 0.5 / 255.0, -1.0, 1.0)
+            tf.clip_by_value(stopped_latents - 0.5 / values, -1.0, 1.0)
         )
 
         return likelihoods

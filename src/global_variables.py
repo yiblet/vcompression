@@ -333,6 +333,12 @@ def define_flags(additional_flags=None, modify_parser=None, args=None):
     )
 
     parser.add_argument(
+        '-quantization_bits',
+        default=8.0,
+        type=float,
+    )
+
+    parser.add_argument(
         '-large_image_dir',
         default=default_large_image_dir,
         type=str,
