@@ -333,6 +333,12 @@ def define_flags(additional_flags=None, modify_parser=None, args=None):
     )
 
     parser.add_argument(
+        '-quantize',
+        default=True,
+        type=boolean_string,
+    )
+
+    parser.add_argument(
         '-quantization_bits',
         default=8.0,
         type=float,

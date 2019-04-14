@@ -99,24 +99,28 @@ class Downsampler(tf.keras.layers.Layer):
         )[:, ::2, ::2, :]
 
 
-class Quantizer(tf.keras.layers.Layer):
+if FLAGS.quantize:
 
-    def call(self, input):
+    class Quantizer(tf.keras.layers.Layer):
 
-        @tf.custom_gradient
-        def quantizer(latent):
-            values = 2**FLAGS.quantization_bits - 1.0
-            expand = latent * values
-            expand = tf.clip_by_value(expand, 0, values)
-            expand = tf.round(expand)
-            expand /= values
+        def call(self, input):
 
-            def grad(dy):
-                return dy
+            @tf.custom_gradient
+            def quantizer(latent):
+                values = 2**FLAGS.quantization_bits - 1.0
+                expand = latent * values
+                expand = tf.clip_by_value(expand, 0, values)
+                expand = tf.round(expand)
+                expand /= values
 
-            return expand, grad
+                def grad(dy):
+                    return dy
 
-        return quantizer(input)
+                return expand, grad
+
+            return quantizer(input)
+else:
+    Quantizer = Identity
 
 
 class LatentDistribution(tf.keras.layers.Layer):
