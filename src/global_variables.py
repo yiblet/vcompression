@@ -31,6 +31,16 @@ class Namespace(types.SimpleNamespace):
                 setattr(self, k, v)
 
 
+def enum_of(options):
+
+    def check(val):
+        if val in options:
+            return val
+        raise ValueError(f'enum option is not valid must be one of {options}')
+
+    return check
+
+
 FLAGS = Namespace(is_set=False)
 
 
@@ -343,8 +353,12 @@ def define_flags(additional_flags=None, modify_parser=None, args=None):
 
     parser.add_argument(
         '-quantize',
-        default=True,
-        type=boolean_string,
+        default='quantize',
+        type=enum_of([
+            'quantize',
+            'noise',
+            'none',
+        ]),
     )
 
     parser.add_argument(

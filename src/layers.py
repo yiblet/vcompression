@@ -103,20 +103,37 @@ class Quantizer(tf.keras.layers.Layer):
 
     def call(self, input):
 
-        @tf.custom_gradient
-        def quantizer(latent):
-            values = 2**FLAGS.quantization_bits - 1.0
-            expand = latent * values
-            expand = tf.clip_by_value(expand, 0, values)
-            expand = tf.round(expand)
-            expand /= values
+        if FLAGS.quantize == 'quantize':
 
-            def grad(dy):
-                return dy
+            @tf.custom_gradient
+            def quantizer(latent):
+                values = 2**FLAGS.quantization_bits - 1.0
+                expand = latent * values
+                expand = tf.clip_by_value(expand, 0, values)
+                expand = tf.round(expand)
+                expand /= values
 
-            return expand, grad
+                def grad(dy):
+                    return dy
 
-        return quantizer(input) if FLAGS.quantize else tf.identity(input)
+                return expand, grad
+
+            return quantizer(input)
+
+        elif FLAGS.quantize == 'noise':
+
+            gap = 1.0 / (2 * (2**FLAGS.quantization_bits - 1.0))
+
+            noise = tf.random.uniform(
+                tf.shape(input),
+                minval=-gap,
+                maxval=gap,
+            )
+
+            return input + noise
+
+        else:
+            return tf.identity(input)
 
 
 class LatentDistribution(tf.keras.layers.Layer):
