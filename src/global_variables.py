@@ -4,6 +4,7 @@ import os
 import types
 import pprint
 import argparse
+import util
 
 WIDTH = 32
 HEIGHT = WIDTH
@@ -38,6 +39,14 @@ def post_setup():
         'git rev-parse HEAD'.split(' '),
         stdout=subprocess.PIPE,
     ).stdout.decode('ascii').strip()
+
+    commit_message = subprocess.run(
+        'git log -n 1 HEAD'.split(' '),
+        stdout=subprocess.PIPE,
+    ).stdout.decode('ascii').strip()
+
+    if FLAGS.debug >= 1:
+        util.print_wrapper('commit', lambda: print(commit_message))
 
     if not FLAGS.local:
         import atexit

@@ -3,6 +3,19 @@ import tensorflow as tf
 import numpy as np
 import types
 
+
+def print_wrapper(name, func, close=True, line_width=80):
+    half_wdith = line_width // 2
+    n = len(name)
+    first = n // 2
+    last = first + (n % 2)
+
+    print('-' * (half_wdith - first) + name + ('-' * (half_wdith - last)))
+    func()
+    if close:
+        print('-' * line_width)
+
+
 # --- plotting
 
 

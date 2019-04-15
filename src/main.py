@@ -349,9 +349,8 @@ def dataset_queue(input_fn=retrieval.large_image_input_fn, crop_size=None):
 
 
 def main():
-    print('-----FLAGS----')
-    pprint.pprint(FLAGS.__dict__)
-    print('--------------')
+    if FLAGS.debug >= 1:
+        util.print_wrapper('FLAGS', lambda: pprint.pprint(FLAGS.__dict__))
 
     if FLAGS.fixed_size is None:
         current_size = FLAGS.min_size
