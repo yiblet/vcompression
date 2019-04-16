@@ -101,9 +101,9 @@ class Downsampler(tf.keras.layers.Layer):
 
 class Quantizer(tf.keras.layers.Layer):
 
-    def call(self, input):
+    def call(self, input, training=False):
 
-        if FLAGS.quantize == 'quantize':
+        if training or FLAGS.quantize == 'quantize':
 
             @tf.custom_gradient
             def quantizer(latent):
@@ -122,7 +122,7 @@ class Quantizer(tf.keras.layers.Layer):
 
         elif FLAGS.quantize == 'noise':
 
-            gap = 1.0 / (2 * (2**FLAGS.quantization_bits - 1.0))
+            gap = 0.5 / (2**FLAGS.quantization_bits - 1.0)
 
             noise = tf.random.uniform(
                 tf.shape(input),
@@ -191,10 +191,8 @@ class LatentDistribution(tf.keras.layers.Layer):
 
         values = 2**FLAGS.quantization_bits - 1.0
         likelihoods = self._distribution.cdf(
-            tf.clip_by_value(stopped_latents + 0.5 / values, -1.0, 1.0)
-        ) - self._distribution.cdf(
-            tf.clip_by_value(stopped_latents - 0.5 / values, -1.0, 1.0)
-        )
+            stopped_latents + 0.5 / values
+        ) - self._distribution.cdf(stopped_latents - 0.5 / values)
 
         return likelihoods
 

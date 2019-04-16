@@ -160,7 +160,10 @@ class Compressor(object):
         latent = self.encoder(size, residual)
         if FLAGS.debug >= 1:
             print(f'encoded: {latent.shape}')
-        latent = layers.Quantizer()(latent)
+
+        with tf.name_scope('quantization'):
+            latent_train = layers.Quantizer()(latent, training=True)
+            latent = layers.Quantizer()(latent)
 
         decoded, upsampled = self.decoder(size, latent)
 
@@ -185,7 +188,7 @@ class Compressor(object):
         outputs.append({
             'input': input,
             'output': output,
-            'likelihood': self.likelihoods(size, latent),
+            'likelihood': self.likelihoods(size, latent_train),
         })
 
         if FLAGS.debug >= 1:
