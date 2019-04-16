@@ -250,7 +250,10 @@ class Compressor(object):
                         layer['input'],
                         layer['output'],
                     )
-                ) for idx, layer in enumerate(self.outputs[-1:])
+                ) for idx, layer in enumerate(
+                    self.outputs[-1:] if not FLAGS.helper_mse_loss else self.
+                    outputs
+                )
             ])
 
             train_mse *= 255**2 / num_pixels

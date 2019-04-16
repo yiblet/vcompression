@@ -176,6 +176,12 @@ def define_flags(additional_flags=None, modify_parser=None, args=None):
     )
 
     parser.add_argument(
+        '-helper_mse_loss',
+        default=False,
+        type=boolean_string,
+    )
+
+    parser.add_argument(
         '-summarize',
         default=True,
         type=boolean_string,
