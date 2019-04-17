@@ -226,12 +226,17 @@ class Compressor(object):
             expected_bits_per_image = tf.reduce_sum(
                 [
                     tf.reduce_sum(
-                        tf.log(layer['likelihood'] + 1e-12),
-                        axis=[1, 2, 3],
+                        layer['likelihood'],
+                        axis=[
+                            1,
+                            2,
+                        ],
                     ) for layer in self.outputs
                 ],
                 axis=[0],
             )
+
+            print(expected_bits_per_image.shape)
 
             train_bpp = tf.reduce_mean(expected_bits_per_image)
             train_bpp /= (-np.log(2) * num_pixels)

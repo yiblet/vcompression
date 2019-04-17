@@ -73,7 +73,8 @@ class Downsampler(tf.keras.layers.Layer):
             scale = tf.nn.relu(self.std) + 1e-6
 
             dist = tfp.distributions.Normal(
-                loc=tf.zeros_like(scale), scale=scale
+                loc=tf.zeros_like(scale),
+                scale=scale,
             )
             vals = dist.prob(
                 tf.range(
@@ -172,6 +173,7 @@ class LatentDistribution(tf.keras.layers.Layer):
             scope['scale'] = scale
 
         self.vars = [categorical, loc, scale]
+
         self._distribution = tfd.MixtureSameFamily(
             mixture_distribution=tfd.Categorical(probs=categorical),
             components_distribution=tfd.Normal(
@@ -190,11 +192,13 @@ class LatentDistribution(tf.keras.layers.Layer):
             stopped_latents = scale_gradient(latent)
 
         values = 2**FLAGS.quantization_bits - 1.0
-        likelihoods = self._distribution.cdf(
-            stopped_latents + 0.5 / values
-        ) - self._distribution.cdf(stopped_latents - 0.5 / values)
+        upper = self._distribution.log_cdf(stopped_latents + 0.5 / values)
+        lower = self._distribution.log_cdf(stopped_latents - 0.5 / values)
 
-        return likelihoods
+        return tf.reduce_sum(
+            upper + tf.log1p(-tf.exp(lower - upper)),
+            axis=[-1],
+        )
 
 
 class ResidualBlock(tf.keras.Model, HasBatchNorm, HasActivation):
@@ -511,7 +515,12 @@ class Decoder(SummaryModel, HasBatchNorm, HasActivation):
             output = layers[-1]
             internal = layers[-2]
 
-        with summary.SummaryScope(self.name + "_upsize") as scope:
-            upsize = scope.sequential(internal, self.model_upsize)
+            upsize = tf.image.resize_bilinear(
+                output,
+                size=[2 * int(shape) for shape in output.shape[1:-1]],
+            )
+            scope['upsize'] = upsize
+        # with summary.SummaryScope(self.name + "_upsize") as scope:
+        #     upsize = scope.sequential(internal, self.model_upsize)
 
         return output, upsize
