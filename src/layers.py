@@ -64,37 +64,50 @@ class Downsampler(tf.keras.layers.Layer):
 
     def build(self, input_shape):
 
-        with summary.SummaryScope(self.name) as scope:
-            self.std = self.add_weight(
-                'std',
-                shape=[int(input_shape[-1])],
+        if FLAGS.gaussian_downsample:
+
+            with summary.SummaryScope(self.name) as scope:
+                self.std = self.add_weight(
+                    'std',
+                    shape=[int(input_shape[-1])],
+                    trainable=True,
+                )
+                scale = tf.nn.relu(self.std) + 1e-6
+
+                dist = tfp.distributions.Normal(
+                    loc=tf.zeros_like(scale),
+                    scale=scale,
+                )
+                vals = dist.prob(
+                    tf.range(
+                        start=-self.size,
+                        limit=self.size + 1,
+                        dtype=tf.float32,
+                    )[:, tf.newaxis]
+                )
+
+                gauss_kernel = vals[:, tf.newaxis, :] * vals[tf.newaxis, :, :]
+                gauss_kernel /= tf.reduce_sum(gauss_kernel, axis=[0, 1])
+                self.kernel = gauss_kernel[:, :, :, tf.newaxis]
+
+                scope['std'] = self.std
+        else:
+            self.kernel = self.add_weight(
+                'kernel',
+                shape=[
+                    2 * self.size + 1,
+                    2 * self.size + 1,
+                    int(input_shape[-1]),
+                    1,
+                ],
                 trainable=True,
             )
-            scale = tf.nn.relu(self.std) + 1e-6
-
-            dist = tfp.distributions.Normal(
-                loc=tf.zeros_like(scale),
-                scale=scale,
-            )
-            vals = dist.prob(
-                tf.range(
-                    start=-self.size,
-                    limit=self.size + 1,
-                    dtype=tf.float32,
-                )[:, tf.newaxis]
-            )
-
-            gauss_kernel = vals[:, tf.newaxis, :] * vals[tf.newaxis, :, :]
-            gauss_kernel /= tf.reduce_sum(gauss_kernel, axis=[0, 1])
-            self.gauss_kernel = gauss_kernel[:, :, :, tf.newaxis]
-
-            scope['std'] = self.std
 
     def call(self, input):
 
         return tf.nn.depthwise_conv2d(
             input,
-            self.gauss_kernel,
+            self.kernel,
             strides=[1, 1, 1, 1],
             padding="SAME",
         )[:, ::2, ::2, :]

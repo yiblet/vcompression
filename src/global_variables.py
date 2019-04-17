@@ -231,6 +231,14 @@ def define_flags(additional_flags=None, modify_parser=None, args=None):
     )
 
     parser.add_argument(
+        '-gaussian_downsample',
+        nargs='*',
+        default=False,
+        type=boolean_string,
+        help='downsample with gaussian blur',
+    )
+
+    parser.add_argument(
         '-default_filter',
         nargs='*',
         default=[5, 5],
