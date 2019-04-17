@@ -231,6 +231,14 @@ def define_flags(additional_flags=None, modify_parser=None, args=None):
     )
 
     parser.add_argument(
+        '-default_filter',
+        nargs='*',
+        default=[5, 5],
+        type=int,
+        help='default filter',
+    )
+
+    parser.add_argument(
         '-increment_size_intervals',
         nargs='*',
         default=[20, 50, 100],

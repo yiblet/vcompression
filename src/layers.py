@@ -316,7 +316,7 @@ class Encoder(SummaryModel, HasBatchNorm, HasActivation):
         self.model_layers = [
             tf.layers.Conv2D(
                 self.channels,
-                [5, 5],
+                FLAGS.default_filter,
                 [2, 2],
                 padding='same',
                 name='conv_1',
@@ -332,7 +332,7 @@ class Encoder(SummaryModel, HasBatchNorm, HasActivation):
             ),
             tf.layers.Conv2D(
                 self.channels,
-                [5, 5],
+                FLAGS.default_filter,
                 [2, 2],
                 name='conv_2',
                 padding='same',
@@ -348,7 +348,7 @@ class Encoder(SummaryModel, HasBatchNorm, HasActivation):
             ),
             tf.layers.Conv2D(
                 self.channels,
-                [5, 5],
+                FLAGS.default_filter,
                 [2, 2],
                 name='conv_3',
                 padding='same',
@@ -364,7 +364,7 @@ class Encoder(SummaryModel, HasBatchNorm, HasActivation):
             ),
             tf.layers.Conv2D(
                 self.channels,
-                [5, 5],
+                FLAGS.default_filter,
                 [2, 2],
                 name='conv_4',
                 padding='same',
@@ -409,7 +409,7 @@ class Decoder(SummaryModel, HasBatchNorm, HasActivation):
     def init(self):
         self.model_last = tf.layers.Conv2DTranspose(
             3,
-            [5, 5],
+            FLAGS.default_filter,
             [1, 1],
             name='deconv_to_image',
             activation=None,
@@ -419,7 +419,7 @@ class Decoder(SummaryModel, HasBatchNorm, HasActivation):
         self.model_layers = [
             tf.layers.Conv2DTranspose(
                 self.channels,
-                [5, 5],
+                FLAGS.default_filter,
                 [2, 2],
                 name='deconv_2',
                 padding='same',
@@ -435,7 +435,7 @@ class Decoder(SummaryModel, HasBatchNorm, HasActivation):
             ),
             tf.layers.Conv2DTranspose(
                 self.channels,
-                [5, 5],
+                FLAGS.default_filter,
                 [2, 2],
                 name='deconv_3',
                 padding='same',
@@ -451,7 +451,7 @@ class Decoder(SummaryModel, HasBatchNorm, HasActivation):
             ),
             tf.layers.Conv2DTranspose(
                 self.channels,
-                [5, 5],
+                FLAGS.default_filter,
                 [2, 2],
                 name='deconv_4',
                 padding='same',
@@ -467,7 +467,7 @@ class Decoder(SummaryModel, HasBatchNorm, HasActivation):
             ),
             tf.layers.Conv2DTranspose(
                 self.channels,
-                [5, 5],
+                FLAGS.default_filter,
                 [2, 2],
                 name='deconv_5',
                 padding='same',
@@ -487,7 +487,7 @@ class Decoder(SummaryModel, HasBatchNorm, HasActivation):
         self.model_upsize = [
             tf.layers.Conv2DTranspose(
                 self.channels,
-                [5, 5],
+                FLAGS.default_filter,
                 [2, 2],
                 name='deconv_upsize',
                 padding='same',
