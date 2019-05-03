@@ -170,6 +170,24 @@ def define_flags(additional_flags=None, modify_parser=None, args=None):
     )
 
     parser.add_argument(
+        '-restore',
+        default=None,
+        type=str,
+    )
+
+    parser.add_argument(
+        '-save_freq',
+        default=5,
+        type=int,
+    )
+
+    parser.add_argument(
+        '-max_to_keep',
+        default=20,
+        type=int,
+    )
+
+    parser.add_argument(
         '-run_type',
         default='primary',
         type=str,

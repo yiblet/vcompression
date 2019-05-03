@@ -359,7 +359,24 @@ def dataset_queue(input_fn=retrieval.large_image_input_fn, crop_size=None):
     )
 
 
+def init_saver(sess, saver):
+
+    if FLAGS.restore:
+        print('restoring....')
+        saver.restore(sess, FLAGS.restore)
+
+    tf.gfile.MakeDirs(f'{FLAGS.summaries_dir}/saves')
+
+
+def save_graph(sess, saver, test_output, save_count):
+    saver.save(
+        sess,
+        f'{FLAGS.summaries_dir}/saves/model.save={save_count:04d}_psnr={test_output["metrics/psnr"]:5f}_bpp={test_output["metrics/bpp"]:5f}_.cpkt'
+    )
+
+
 def main():
+
     if FLAGS.debug >= 1:
         util.print_wrapper('FLAGS', lambda: pprint.pprint(FLAGS.__dict__))
 
@@ -406,6 +423,10 @@ def main():
         else:
             feed = {}
         sess.run([tf.global_variables_initializer(), *initializers], feed)
+        saver = tf.train.Saver(max_to_keep=FLAGS.max_to_keep)
+        save_count = 0
+        best_psnr = -1
+        init_saver(sess, saver)
 
         if FLAGS.tpu_address is not None:
             print('Initializing TPUs...')
@@ -548,6 +569,21 @@ def main():
                 f'time elapsed: {time.time() - start_time:.3f} seconds '
             )
 
+            best_psnr = max(best_psnr, test_output["metrics/psnr"])
+
+            if (
+                save_count % FLAGS.save_freq == 0
+                or best_psnr == test_output["metrics/psnr"]
+            ):
+                save_graph(
+                    sess,
+                    saver,
+                    test_output,
+                    save_count,
+                )
+
+            save_count += 1
+
     finally:
         # For now, TPU sessions must be shutdown separately from
         # closing the session.
@@ -557,5 +593,6 @@ def main():
 
 
 if __name__ == "__main__":
+    util.print_wrapper('COMMAND', lambda: print("python " + " ".join(sys.argv)))
     define_flags()
     main()
