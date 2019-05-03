@@ -305,7 +305,7 @@ class Compressor(object):
 
 
 def clean_log_directories():
-    if tf.gfile.Exists(FLAGS.summaries_dir):
+    if tf.gfile.Exists(FLAGS.summaries_dir) and (not FLAGS.auto_restore):
         files_to_remove = [
             f'{FLAGS.summaries_dir}/{dir}_{FLAGS.run_type}'
             for dir in [FLAGS.train_dir, FLAGS.test_dir]
@@ -364,8 +364,38 @@ def init_saver(sess, saver):
     if FLAGS.restore:
         print('restoring....')
         saver.restore(sess, FLAGS.restore)
+        return 0
+
+    if FLAGS.auto_restore:
+
+        save_dir = f'{FLAGS.summaries_dir}/saves'
+
+        if not tf.gfile.Exists(save_dir):
+            return 0
+
+        checkpoints = sorted([
+            checkpoint for checkpoint in tf.gfile.ListDirectory(save_dir)
+            if str(checkpoint).endswith('.index')
+        ])
+
+        latest_checkpoint = str(checkpoints[-1])
+
+        search_string = 'save='
+        loc = latest_checkpoint.find(search_string)
+        num_saves = int(
+            latest_checkpoint[loc + len(search_string):latest_checkpoint.
+                              find('_', loc)]
+        ) + 1
+
+        restore_location = save_dir + '/' + latest_checkpoint[:-len('.index')]
+        print(f'restoring from {restore_location}')
+        saver.restore(sess, restore_location)
+
+        return num_saves
 
     tf.gfile.MakeDirs(f'{FLAGS.summaries_dir}/saves')
+
+    return 0
 
 
 def save_graph(sess, saver, test_output, save_count):
@@ -424,9 +454,8 @@ def main():
             feed = {}
         sess.run([tf.global_variables_initializer(), *initializers], feed)
         saver = tf.train.Saver(max_to_keep=FLAGS.max_to_keep)
-        save_count = 0
+        save_count = init_saver(sess, saver)
         best_psnr = -1
-        init_saver(sess, saver)
 
         if FLAGS.tpu_address is not None:
             print('Initializing TPUs...')
