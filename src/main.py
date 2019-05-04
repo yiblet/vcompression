@@ -498,6 +498,7 @@ def main():
                     use_train_data: False,
                 }
 
+            test_time = time.time()
             test_output = sess.run(
                 in_categories(
                     [Compressor.METRICS, Compressor.SUMMARIES],
@@ -505,6 +506,9 @@ def main():
                 ),
                 feed,
             )
+
+            test_time = time.time() - test_time
+
             test_writer.add_summary(
                 test_output[Compressor.DATA],
                 FLAGS.train_steps * epoch,
@@ -596,6 +600,7 @@ def main():
                 f'psnr: {test_output["metrics/psnr"]:.6f} '
                 f'psnr/bpp: {test_output["metrics/psnr"] / test_output["metrics/bpp"] :.6f} '
                 f'time elapsed: {time.time() - start_time:.3f} seconds '
+                f'test time elapsed: {test_time:.3f} seconds '
             )
 
             best_psnr = max(best_psnr, test_output["metrics/psnr"])
