@@ -170,6 +170,12 @@ def define_flags(additional_flags=None, modify_parser=None, args=None):
     )
 
     parser.add_argument(
+        '-run_test',
+        default=False,
+        type=boolean_string,
+    )
+
+    parser.add_argument(
         '-auto_restore',
         default=False,
         type=boolean_string,

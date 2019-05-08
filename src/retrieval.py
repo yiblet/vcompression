@@ -44,20 +44,29 @@ def large_image_input_fn(test=False, crop_size=None):
     if crop_size is None:
         return ValueError('crop_size must not be None')
 
-    if FLAGS.local:
+    if FLAGS.local and FLAGS.run_test:
+        dataset = tf.data.Dataset.from_tensor_slices(
+            tf.io.matching_files(f'local/kodak/**.png')
+        ).map(tf.io.read_file)
+    elif FLAGS.local:
         dataset = tf.data.Dataset.from_tensor_slices(
             tf.io.matching_files(f'{FLAGS.large_image_dir}/**/*jpg')
         ).map(tf.io.read_file)
     else:
         dataset = tf.data.TFRecordDataset(FLAGS.record_data)
 
-    if test:
+    if FLAGS.run_test:
+        pass
+    elif test:
         dataset = dataset.take(FLAGS.holdout_size)
     else:
         dataset = dataset.skip(FLAGS.holdout_size)
 
     def parse_image(image):
-        return tf.image.decode_jpeg(image, channels=3)
+        if FLAGS.run_test:
+            return tf.image.decode_png(image, channels=3)
+        else:
+            return tf.image.decode_jpeg(image, channels=3)
 
     def is_large_image(image):
         shape = tf.shape(image)[:2]
@@ -67,6 +76,10 @@ def large_image_input_fn(test=False, crop_size=None):
         image = tf.image.random_crop(image, [crop_size, crop_size, 3])
         image = tf.dtypes.cast(image, tf.float32) / 255.0
         return image, image
+
+    if FLAGS.run_test:
+        return dataset.repeat().map(parse_image).filter(is_large_image
+                                                       ).map(reshape).batch(25)
 
     return dataset.repeat().map(parse_image).filter(
         is_large_image,

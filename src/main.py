@@ -97,6 +97,7 @@ class Compressor(object):
     METRICS = 'metrics'
     TRAIN = 'train'
     SUMMARIES = 'summary'
+    OUTPUT = 'OUTPUT'
 
     DATA = 'summary/data'
 
@@ -123,6 +124,9 @@ class Compressor(object):
             'metrics/mse': self.train_mse,
             'metrics/psnr': self.train_psnr,
             'metrics/ssim': self.train_ssim,
+            'output/image': self.output_image,
+            'output/original': self.output_original,
+            'output/bits': self.output_expected_bits,
         }
 
     def new_original_dim(self, original_dim):
@@ -238,8 +242,13 @@ class Compressor(object):
 
             print(expected_bits_per_image.shape)
 
-            train_bpp = tf.reduce_mean(expected_bits_per_image)
-            train_bpp /= (-np.log(2) * num_pixels)
+            self.output_expected_bits = expected_bits_per_image / (
+                -np.log(2) * num_pixels
+            )
+            train_bpp = tf.reduce_mean(self.output_expected_bits)
+
+            self.output_image = self.outputs[-1]['output']
+            self.output_original = self.outputs[-1]['input']
 
             train_ssim = tf.reduce_mean(
                 1 - tf.image.ssim(
@@ -462,6 +471,21 @@ def main():
             sess.run(tf.contrib.tpu.initialize_system())
 
         print('Running ops')
+
+        if FLAGS.run_test:
+            images, originals, bits = sess.run([
+                tensors['output/image'], tensors['output/original'],
+                tensors['output/bits']
+            ], {use_train_data: False})
+            import scipy
+            import scipy.misc
+            for (idx, (og, im)) in enumerate(zip(originals, images)):
+                scipy.misc.imsave(f'local/kodak_tests/og_{idx + 1:02d}.png', og)
+                scipy.misc.imsave(
+                    f'local/kodak_tests/im_{idx + 1:02d}.{bits[idx]:5f}.png', im
+                )
+
+            return
 
         resize_times = {
             size: 2**(i + 4)
