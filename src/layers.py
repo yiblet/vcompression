@@ -205,11 +205,11 @@ class LatentDistribution(tf.keras.layers.Layer):
             stopped_latents = scale_gradient(latent)
 
         values = 2**FLAGS.quantization_bits - 1.0
-        upper = self._distribution.log_cdf(stopped_latents + 0.5 / values)
-        lower = self._distribution.log_cdf(stopped_latents - 0.5 / values)
+        upper = self._distribution.cdf(stopped_latents + 0.5 / values)
+        lower = self._distribution.cdf(stopped_latents - 0.5 / values)
 
         return tf.reduce_sum(
-            upper + tf.log1p(-tf.exp(lower - upper)),
+            tf.log(upper - lower),
             axis=[-1],
         )
 
